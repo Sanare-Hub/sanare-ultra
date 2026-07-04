@@ -174,7 +174,7 @@
         const SUPABASE_URL = "https://cvzwkifoexnjbtuvwxjr.supabase.co";
         const SUPABASE_ANON_KEY = "sb_publishable__VapXVAabPKcv6lXJ8Agag_1nxbP4ay";
 
-        const supabase = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+        const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
         let vaultDataCache = [];
 
         // Auth Lifecycle State Manager
