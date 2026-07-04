@@ -4,9 +4,13 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>SANARE ULTRA | Premium Medical Hub</title>
+    <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Google Fonts -->
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <!-- Lucide Icons -->
     <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- Supabase JS Library -->
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script>
         tailwind.config = {
@@ -37,12 +41,14 @@
 
     <div id="root"></div>
 
+    <!-- React CDNs -->
     <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
+    <!-- React Engine UI Processing Layer -->
     <script type="text/babel">
-        const { useState, useEffect } = React;
+        const { useState, useEffect, useMemo } = React;
 
         const SUPABASE_URL = "https://cvzwkifoexnjbtuvwxjr.supabase.co";
         const SUPABASE_ANON_KEY = "sb_publishable__VapXVAabPKcv6lXJ8Agag_1nxbP4ay";
@@ -54,7 +60,7 @@
             const [authError, setAuthError] = useState("");
             const [isVerifying, setIsVerifying] = useState(false);
             
-            // Connected React Live Database Arrays
+            // Database arrays
             const [announcement, setAnnouncement] = useState(null);
             const [weeklySchedule, setWeeklySchedule] = useState([]);
             const [books, setBooks] = useState([]);
@@ -62,9 +68,19 @@
             const [batchFolders, setBatchFolders] = useState([]);
             const [configMap, setConfigMap] = useState({});
 
-            // Dynamic Sub-filters for Notes/Sud_An tabs
+            // Global Master Filters
             const [selectedBatch, setSelectedBatch] = useState("Sanare");
             const [selectedSemester, setSelectedSemester] = useState("1st Semester");
+            const [selectedSubject, setSelectedSubject] = useState("All");
+            const [selectedBlock, setSelectedBlock] = useState("All");
+            const [selectedBookSubject, setSelectedBookSubject] = useState("All");
+
+            // Reset secondary filters when tabs switch to prevent stale states
+            useEffect(() => {
+                setSelectedSubject("All");
+                setSelectedBlock("All");
+                setSelectedBookSubject("All");
+            }, [currentTab, selectedBatch, selectedSemester]);
 
             useEffect(() => {
                 const { data: { subscription } } = coreClient.auth.onAuthStateChange(async (event, session) => {
@@ -89,7 +105,7 @@
                         setIsVerifying(false);
                         setCurrentPage("dashboard");
                         
-                        // Execute parallel sheet data streams
+                        // Hydrate application streams
                         fetchConfig();
                         fetchAnnouncements();
                         fetchTimetable();
@@ -105,7 +121,7 @@
 
             useEffect(() => { if (window.lucide) window.lucide.createIcons(); });
 
-            // --- DATABASE SYNC LAYERS ---
+            // --- DATABASE ACTIONS ---
             async function fetchConfig() {
                 const { data } = await coreClient.from('system_config').select('*');
                 if (data) {
@@ -114,33 +130,28 @@
                     setConfigMap(mapped);
                 }
             }
-
             async function fetchAnnouncements() {
                 const { data } = await coreClient.from('announcements').select('*').order('date_posted', { ascending: false }).limit(1);
                 if (data && data.length > 0) setAnnouncement(data[0]);
             }
-
             async function fetchTimetable() {
                 const { data } = await coreClient.from('weekly_schedule').select('*').order('day_of_week', { ascending: true });
                 if (data) setWeeklySchedule(data);
             }
-
             async function fetchBooks() {
                 const { data } = await coreClient.from('medical_books').select('*').order('book_name', { ascending: true });
                 if (data) setBooks(data);
             }
-
             async function fetchAcademicResources() {
                 const { data } = await coreClient.from('academic_resources').select('*').order('topic', { ascending: true });
                 if (data) setAcademicResources(data);
             }
-
             async function fetchBatchFolders() {
                 const { data } = await coreClient.from('batch_folders').select('*').order('topic', { ascending: true });
                 if (data) setBatchFolders(data);
             }
 
-            // --- DRIVE STREAM PARSERS ---
+            // --- G-DRIVE OPTIMIZATION ROUTERS ---
             const resolveDriveLinks = (rawUrl) => {
                 if (!rawUrl) return { preview: '#', download: '#' };
                 const str = String(rawUrl).trim();
@@ -157,11 +168,42 @@
                 return { preview: str, download: str };
             };
 
-            // --- BLOCK GROUPING MATHEMATICS ---
-            const getGroupedBlockData = (list, resourceType) => {
-                const filtered = list.filter(item => item.resource_type === resourceType && item.batch === selectedBatch && item.semester === selectedSemester);
+            // --- DYNAMIC FILTER PARSING MECHANICS ---
+            // 1. Filter books down by selected subject dropdown
+            const uniqueBookSubjects = useMemo(() => {
+                const distinct = new Set(books.map(b => b.subject).filter(Boolean));
+                return Array.from(distinct).sort();
+            }, [books]);
+
+            const filteredBooks = useMemo(() => {
+                if (selectedBookSubject === "All") return books;
+                return books.filter(b => b.subject === selectedBookSubject);
+            }, [books, selectedBookSubject]);
+
+            // 2. Filter resources down by Batch + Sem, then calculate available choices dynamically
+            const baseFilteredResources = useMemo(() => {
+                return academicResources.filter(r => r.resource_type === currentTab && r.batch === selectedBatch && r.semester === selectedSemester);
+            }, [academicResources, currentTab, selectedBatch, selectedSemester]);
+
+            const dynamicSubjectsList = useMemo(() => {
+                const distinct = new Set(baseFilteredResources.map(r => r.subject).filter(Boolean));
+                return Array.from(distinct).sort();
+            }, [baseFilteredResources]);
+
+            const dynamicBlocksList = useMemo(() => {
+                const scope = selectedSubject === "All" ? baseFilteredResources : baseFilteredResources.filter(r => r.subject === selectedSubject);
+                const distinct = new Set(scope.map(r => r.block).filter(Boolean));
+                return Array.from(distinct).sort();
+            }, [baseFilteredResources, selectedSubject]);
+
+            // 3. Complete structural file grid matching dropdown states
+            const finalGroupedBlockData = useMemo(() => {
+                let currentScope = baseFilteredResources;
+                if (selectedSubject !== "All") currentScope = currentScope.filter(r => r.subject === selectedSubject);
+                if (selectedBlock !== "All") currentScope = currentScope.filter(r => r.block === selectedBlock);
+
                 const grouped = {};
-                filtered.forEach(item => {
+                currentScope.forEach(item => {
                     let parentGroup = item.block;
                     const numMatch = String(item.block).match(/Block\s+(\d+)/i);
                     if (numMatch) { parentGroup = `Block ${numMatch[1]}`; }
@@ -169,7 +211,7 @@
                     grouped[parentGroup].push(item);
                 });
                 return grouped;
-            };
+            }, [baseFilteredResources, selectedSubject, selectedBlock]);
 
             const daysNames = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
             const currentDayInt = new Date().getDay() === 0 ? 7 : new Date().getDay();
@@ -220,26 +262,69 @@
                             </aside>
 
                             <main class="flex-1 flex flex-col h-full bg-slate-950 overflow-y-auto no-scrollbar pb-16 md:pb-0">
-                                <header class="h-16 border-b border-white/5 px-6 flex items-center justify-between shrink-0 backdrop-blur-md sticky top-0 z-50 bg-slate-950/80">
+                                <header class="border-b border-white/5 px-6 py-3 flex flex-wrap items-center justify-between gap-4 shrink-0 backdrop-blur-md sticky top-0 z-50 bg-slate-950/80">
                                     <div class="flex items-center gap-2">
-                                        <span class="text-xs font-extrabold text-white uppercase tracking-wider">{currentTab} Core Node</span>
+                                        <span class="text-xs font-extrabold text-white uppercase tracking-wider">{currentTab} Node</span>
                                     </div>
+
+                                    {/* DYNAMIC SMART DROPDOWN HUB FOR RESOURCES */}
                                     {["Note", "Sud_An", "Fresh_Sud_An", "Questionnaire"].includes(currentTab) && (
-                                        <div class="flex gap-2 bg-slate-900 p-1 border border-white/5 rounded-xl text-[11px] font-bold">
-                                            {["Sanare", "Manus", "Vesties"].map(b => (
-                                                <button key={b} onClick={() => setSelectedBatch(b)} class={`px-2.5 py-1 rounded-md transition ${selectedBatch === b ? "bg-white text-black" : "text-slate-400 hover:text-white"}`}>{b}</button>
-                                            ))}
-                                            <span class="text-slate-700 self-center">|</span>
-                                            {["1st Semester", "2nd Semester"].map(s => (
-                                                <button key={s} onClick={() => setSelectedSemester(s)} class={`px-2.5 py-1 rounded-md transition ${selectedSemester === s ? "bg-white text-black" : "text-slate-400 hover:text-white"}`}>{s === "1st Semester" ? "Sem 1" : "Sem 2"}</button>
-                                            ))}
+                                        <div class="flex flex-wrap items-center gap-3 bg-slate-900/60 p-2 border border-white/5 rounded-2xl text-[11px] font-bold">
+                                            {/* Batch selection cluster */}
+                                            <div class="flex bg-slate-950 p-1 border border-white/5 rounded-xl">
+                                                {["Sanare", "Manus", "Vesties"].map(b => (
+                                                    <button key={b} onClick={() => setSelectedBatch(b)} class={`px-2.5 py-1 rounded-md transition ${selectedBatch === b ? "bg-white text-black" : "text-slate-400 hover:text-white"}`}>{b}</button>
+                                                ))}
+                                            </div>
+                                            
+                                            {/* Semester selector cluster */}
+                                            <div class="flex bg-slate-950 p-1 border border-white/5 rounded-xl">
+                                                {["1st Semester", "2nd Semester"].map(s => (
+                                                    <button key={s} onClick={() => setSelectedSemester(s)} class={`px-2.5 py-1 rounded-md transition ${selectedSemester === s ? "bg-white text-black" : "text-slate-400 hover:text-white"}`}>{s === "1st Semester" ? "Sem 1" : "Sem 2"}</button>
+                                                ))}
+                                            </div>
+
+                                            {/* Subject Dropdown Filter */}
+                                            <div class="flex items-center gap-1.5 bg-slate-950 px-2 py-1 border border-white/5 rounded-xl">
+                                                <span class="text-slate-500 text-[10px]">Subject:</span>
+                                                <select value={selectedSubject} onChange={(e) => setSelectedSubject(e.target.value)} class="bg-transparent outline-none text-white cursor-pointer max-w-[120px]">
+                                                    <option value="All" class="bg-slate-900 text-white">All Subjects</option>
+                                                    {dynamicSubjectsList.map(subj => (
+                                                        <option key={subj} value={subj} class="bg-slate-900 text-white">{subj}</option>
+                                                    ))}
+                                                </select>
+                                            </div>
+
+                                            {/* Block Dropdown Filter */}
+                                            <div class="flex items-center gap-1.5 bg-slate-950 px-2 py-1 border border-white/5 rounded-xl">
+                                                <span class="text-slate-500 text-[10px]">Block:</span>
+                                                <select value={selectedBlock} onChange={(e) => setSelectedBlock(e.target.value)} class="bg-transparent outline-none text-white cursor-pointer max-w-[120px]">
+                                                    <option value="All" class="bg-slate-900 text-white">All Blocks</option>
+                                                    {dynamicBlocksList.map(blk => (
+                                                        <option key={blk} value={blk} class="bg-slate-900 text-white">{blk}</option>
+                                                    ))}
+                                                </select>
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {/* DYNAMIC SUBJECT SELECTOR FOR BOOKS */}
+                                    {currentTab === "books" && (
+                                        <div class="flex items-center gap-1.5 bg-slate-900/60 p-2 border border-white/5 rounded-xl text-[11px] font-bold">
+                                            <span class="text-slate-400 text-[10px]">Library Subject:</span>
+                                            <select value={selectedBookSubject} onChange={(e) => setSelectedBookSubject(e.target.value)} class="bg-slate-950 border border-white/5 rounded-lg px-2.5 py-1 text-white cursor-pointer outline-none">
+                                                <option value="All">All Reference Books</option>
+                                                {uniqueBookSubjects.map(sub => (
+                                                    <option key={sub} value={sub}>{sub}</option>
+                                                ))}
+                                            </select>
                                         </div>
                                     )}
                                 </header>
 
                                 <div class="flex-1 p-6 md:p-8 space-y-6 max-w-7xl w-full mx-auto">
                                     
-                                    {/* CORE LANDING DISPLAY VIEW */}
+                                    {/* DASHBOARD SYSTEM VIEW */}
                                     {currentTab === "dashboard" && (
                                         <div class="space-y-6 text-left">
                                             {announcement && (
@@ -285,7 +370,7 @@
                                         </div>
                                     )}
 
-                                    {/* MODULE: MEDICAL BOOKS VIEW (2 BUTTON LAYOUT) */}
+                                    {/* MODULE: FILTERED MEDICAL BOOKS MATRIX */}
                                     {currentTab === "books" && (
                                         <div class="space-y-6 text-left">
                                             {configMap.books_master_drive && (
@@ -295,7 +380,7 @@
                                                 </a>
                                             )}
                                             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                                {books.length === 0 ? <div class="col-span-full text-center text-xs text-slate-500 italic py-8">No books logged.</div> : books.map((b, idx) => {
+                                                {filteredBooks.length === 0 ? <div class="col-span-full text-center text-xs text-slate-500 italic py-8">No matching reference textbooks found.</div> : filteredBooks.map((b, idx) => {
                                                     const routes = resolveDriveLinks(b.drive_link);
                                                     return (
                                                         <div key={idx} class="bg-slate-950/30 border border-white/5 rounded-xl p-4 flex items-center justify-between hover:border-white/10 transition-all">
@@ -314,12 +399,12 @@
                                         </div>
                                     )}
 
-                                    {/* DYNAMIC COMBINED CONTENT STREAM (EITHER 1 OR 2 BUTTONS BASED ON CATEGORY RULES) */}
+                                    {/* DYNAMIC ADVANCED MULTI-TIER FILTER CONTENT LIST */}
                                     {["Note", "Sud_An", "Fresh_Sud_An", "Questionnaire"].includes(currentTab) && (
                                         <div class="space-y-6 text-left">
-                                            {Object.keys(getGroupedBlockData(academicResources, currentTab)).length === 0 ? (
-                                                <div class="text-center text-xs text-slate-500 italic py-12 border border-dashed border-white/5 rounded-2xl">No asset structures registered under current {selectedBatch} / {selectedSemester} filter paths.</div>
-                                            ) : Object.entries(getGroupedBlockData(academicResources, currentTab)).map(([blockName, items]) => {
+                                            {Object.keys(finalGroupedBlockData).length === 0 ? (
+                                                <div class="text-center text-xs text-slate-500 italic py-12 border border-dashed border-white/5 rounded-2xl">No assets match your active filter dropdown matrix parameters.</div>
+                                            ) : Object.entries(finalGroupedBlockData).map(([blockName, items]) => {
                                                 const isSingleRedirectTab = ["Fresh_Sud_An", "Questionnaire"].includes(currentTab);
                                                 return (
                                                     <div key={blockName} class="space-y-3">
@@ -331,7 +416,7 @@
                                                                     <div key={idx} class="bg-slate-950/30 border border-white/5 rounded-xl p-4 flex items-center justify-between hover:border-white/10 transition-all">
                                                                         <div class="space-y-1 max-w-[65%]">
                                                                             <div class="flex items-center gap-2">
-                                                                                <span class="text-[9px] font-bold text-slate-500 uppercase tracking-widest">{item.subject}</span>
+                                                                                <span class="text-[9px] font-bold text-blue-400 uppercase tracking-widest">{item.subject}</span>
                                                                                 <span class="text-[9px] px-1.5 py-0.2 bg-white/5 text-slate-400 border border-white/5 rounded">{item.block}</span>
                                                                             </div>
                                                                             <h4 class="text-sm font-semibold text-slate-200 truncate">{item.topic}</h4>
@@ -339,7 +424,7 @@
                                                                         <div class="flex items-center space-x-2 shrink-0">
                                                                             {isSingleRedirectTab ? (
                                                                                 <a href={item.file_link} target="_blank" class="px-3 py-2 bg-blue-500/10 text-blue-400 border border-blue-500/20 hover:bg-blue-500/20 rounded-xl transition-all flex items-center gap-1.5 text-xs font-bold">
-                                                                                    <span>Open Terminal</span>
+                                                                                    <span>Open Link</span>
                                                                                     <i data-lucide="external-link" class="w-3.5 h-3.5"></i>
                                                                                 </a>
                                                                             ) : (
@@ -390,7 +475,7 @@
                                 </div>
                             </main>
 
-                            {/* Mobile Dock Control Strip */}
+                            {/* Mobile Navigation Dock */}
                             <nav class="md:hidden fixed bottom-0 left-0 w-full h-16 bg-slate-950/80 backdrop-blur-md border-t border-white/5 z-40 px-1 flex justify-around items-center">
                                 <button onClick={() => setCurrentTab("dashboard")} class={`flex flex-col items-center justify-center p-1 ${currentTab === "dashboard" ? "text-white" : "text-slate-500"}`}><i data-lucide="layout-dashboard" class="w-4 h-4 mb-0.5"></i><span class="text-[9px] font-bold">Overview</span></button>
                                 <button onClick={() => setCurrentTab("books")} class={`flex flex-col items-center justify-center p-1 ${currentTab === "books" ? "text-white" : "text-slate-500"}`}><i data-lucide="book-open" class="w-4 h-4 mb-0.5"></i><span class="text-[9px] font-bold">Books</span></button>
