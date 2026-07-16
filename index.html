@@ -40,6 +40,10 @@
         .global-transition {
             transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
         }
+        /* Ultra Smooth Dropdown Accordion Slide Motion */
+        .accordion-content {
+            transition: max-height 0.4s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.3s ease-out;
+        }
     </style>
 </head>
 <body class="bg-[#f8f9fa] dark:bg-[#050508] text-gray-900 dark:text-white min-h-screen flex antialiased selection:bg-blue-500/30 selection:text-blue-400">
@@ -59,6 +63,12 @@
         const SUPABASE_ANON_KEY = "sb_publishable__VapXVAabPKcv6lXJ8Agag_1nxbP4ay";
         const coreClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
+        // --- PHASE 1: ADMIN WHITELIST CHECKER ---
+        // Change or add the Google emails of authorized officers here
+        const ADMIN_WHITELIST = [
+            "arlan.segocio@gmail.com",
+        ];
+
         function App() {
             const [currentPage, setCurrentPage] = useState("auth"); 
             const [currentTab, setCurrentTab] = useState("dashboard"); 
@@ -69,6 +79,7 @@
             const [isDark, setIsDark] = useState(true);
             const [toasts, setToasts] = useState([]);
             const [userFirstName, setUserFirstName] = useState("Scholar");
+            const [currentUserEmail, setCurrentUserEmail] = useState("");
             const [searchQuery, setSearchQuery] = useState("");
             const [showScrollTop, setShowScrollTop] = useState(false);
 
@@ -88,6 +99,40 @@
             const [activeSubject, setActiveSubject] = useState(null);
             const [expandedBlocks, setExpandedBlocks] = useState({});
 
+            // --- ADMIN INPUT PANEL STATES ---
+            const [isAdminMode, setIsAdminMode] = useState(false);
+            const [isPublishing, setIsPublishing] = useState(false);
+            
+            // Form 1: Study Asset State
+            const [assetForm, setAssetForm] = useState({
+                resource_type: "Note",
+                batch: "Sanare",
+                semester: "1st Semester",
+                subject: "Anatomy",
+                block: "Block 1",
+                topic: "",
+                file_link: ""
+            });
+
+            // Form 2: Bulletin State
+            const [bulletinForm, setBulletinForm] = useState({
+                announcement_text: "",
+                date_posted: ""
+            });
+
+            // Form 3: Class Schedule State
+            const [scheduleForm, setScheduleForm] = useState({
+                day_of_week: 1,
+                event_title: "",
+                event_date: ""
+            });
+
+            // check if current user is Whitelisted as an admin officer
+            const isUserAdminOfficer = useMemo(() => {
+                if (!currentUserEmail) return false;
+                return ADMIN_WHITELIST.includes(currentUserEmail.toLowerCase().trim());
+            }, [currentUserEmail]);
+
             // Ambient Theme Sync Monitor Listener
             useEffect(() => {
                 const body = document.body;
@@ -102,7 +147,7 @@
                 }
             }, [isDark]);
 
-            // Window Scroll Listener for Floating Anchor
+            // Quick Scroll Observer
             useEffect(() => {
                 const handleScroll = () => {
                     if (window.scrollY > 300) setShowScrollTop(true);
@@ -123,6 +168,7 @@
                     if (session) {
                         setIsVerifying(true);
                         const loggedInEmail = session.user?.email;
+                        setCurrentUserEmail(loggedInEmail || "");
 
                         const { data: whitelistCheck, error: whitelistError } = await coreClient
                             .from('allowed_emails')
@@ -307,7 +353,7 @@
                 return map;
             }, [filteredResources]);
 
-            // --- DEEP SPECIFIC FILE MATCH SCANNERS ---
+            // --- DEEP SPECIFIC FILE MATCH SCANNERS (RECOMMENDATION 5) ---
             const searchedDeepFiles = useMemo(() => {
                 if (!searchQuery.trim()) return [];
                 return filteredResources.filter(item => item.topic.toLowerCase().includes(searchQuery.toLowerCase().trim()));
@@ -349,17 +395,103 @@
                 dashboard: "Overview",
                 books: "Medical Books",
                 Note: "Lecture Notes",
-                Sub_An: "Recalls Archives",
+                Sud_An: "Recalls Archives",
                 Fresh_Sud_An: "New Recalls",
                 Questionnaire: "Interactive Quizzes",
                 folders: "Batch Folders",
                 calendar: "School Calendar"
             };
 
+            // --- PHASE 4: ADMINISTRATIVE WRITE REQUEST PUBLISH HANDLERS ---
+            const handlePublishAsset = async (e) => {
+                e.preventDefault();
+                if (!assetForm.topic || !assetForm.file_link) {
+                    alert("Please provide both a topic title and a valid connection link.");
+                    return;
+                }
+                setIsPublishing(true);
+                try {
+                    const payload = {
+                        resource_type: assetForm.resource_type,
+                        batch: assetForm.batch,
+                        semester: assetForm.semester,
+                        subject: assetForm.subject,
+                        block: assetForm.block,
+                        topic: assetForm.topic.trim(),
+                        file_link: assetForm.file_link.trim()
+                    };
+
+                    const { error } = await coreClient.from('academic_resources').insert([payload]);
+                    if (error) throw error;
+
+                    triggerSystemToastAlert(`${assetForm.topic} uploaded successfully!`);
+                    setAssetForm(prev => ({ ...prev, topic: "", file_link: "" }));
+                    await fetchAcademicResources();
+                } catch (err) {
+                    alert(`Failed to upload asset: ${err.message}`);
+                } finally {
+                    setIsPublishing(false);
+                }
+            };
+
+            const handlePublishBulletin = async (e) => {
+                e.preventDefault();
+                if (!bulletinForm.announcement_text) {
+                    alert("Please write the announcement text first.");
+                    return;
+                }
+                setIsPublishing(true);
+                try {
+                    const todayStr = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+                    const payload = {
+                        announcement_text: bulletinForm.announcement_text.trim(),
+                        date_posted: bulletinForm.date_posted.trim() || `Today, ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+                    };
+
+                    const { error } = await coreClient.from('announcements').insert([payload]);
+                    if (error) throw error;
+
+                    triggerSystemToastAlert("Latest bulletin announcement published live!");
+                    setBulletinForm({ announcement_text: "", date_posted: "" });
+                    await fetchAnnouncements();
+                } catch (err) {
+                    alert(`Failed to push bulletin: ${err.message}`);
+                } finally {
+                    setIsPublishing(false);
+                }
+            };
+
+            const handlePublishSchedule = async (e) => {
+                e.preventDefault();
+                if (!scheduleForm.event_title || !scheduleForm.event_date) {
+                    alert("Please enter both the class name and class schedule hours.");
+                    return;
+                }
+                setIsPublishing(true);
+                try {
+                    const payload = {
+                        day_of_week: parseInt(scheduleForm.day_of_week),
+                        event_title: scheduleForm.event_title.trim(),
+                        event_date: scheduleForm.event_date.trim()
+                    };
+
+                    const { error } = await coreClient.from('weekly_schedule').insert([payload]);
+                    if (error) throw error;
+
+                    triggerSystemToastAlert(`Scheduled event '${scheduleForm.event_title}' is now active!`);
+                    setScheduleForm({ day_of_week: 1, event_title: "", event_date: "" });
+                    await fetchTimetable();
+                } catch (err) {
+                    alert(`Failed to schedule event: ${err.message}`);
+                } finally {
+                    setIsPublishing(false);
+                }
+            };
+
             return (
                 <div class="w-full flex min-h-screen overflow-x-hidden relative font-sans">
                     
-                    {/* FLOATING QUICK-RETURN ANCHOR BUTTON (RECOMMENDATION 2) */}
+                    {/* FLOATING QUICK-RETURN ANCHOR BUTTON */}
                     {showScrollTop && (
                         <button onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })} class="fixed bottom-20 md:bottom-8 right-6 z-40 w-10 h-10 rounded-full bg-blue-600 hover:bg-blue-500 text-white flex items-center justify-center shadow-lg transition-all transform hover:scale-105 active:scale-95 animate-fade-in">
                             <i class="ph ph-arrow-up text-lg font-bold"></i>
@@ -412,7 +544,7 @@
                     {currentPage === "dashboard" && (
                         <div class="w-full flex min-h-screen">
                             
-                            {/* SIDEBAR PANEL PANEL */}
+                            {/* COLLAPSIBLE SIDEBAR PANEL - GHOST TEXT CLEANED */}
                             <aside class="hidden md:flex flex-col fixed left-0 top-0 h-full bg-white dark:bg-[#0c0d12] glass-panel border-r border-gray-100 dark:border-white/5 py-8 z-50 transition-all duration-300 ease-in-out w-20 hover:w-64 group/sidebar shadow-sm overflow-hidden">
                                 <div class="px-5 mb-8 flex items-center gap-3.5 shrink-0 overflow-hidden w-full h-10">
                                     <div class="w-10 h-10 shrink-0 rounded-[14px] bg-blue-600/10 border border-blue-600/20 flex items-center justify-center shadow-sm">
@@ -434,13 +566,22 @@
                                         { id: "folders", icon: "ph-folder-user", label: "Batch Folders" },
                                         { id: "calendar", icon: "ph-calendar-blank", label: "School Calendar" }
                                     ].map(tab => (
-                                        <button key={tab.id} onClick={() => setCurrentTab(tab.id)} class={`w-full flex items-center gap-3 p-3 rounded-[14px] transition whitespace-nowrap overflow-hidden ${currentTab === tab.id ? "bg-blue-600/10 dark:bg-blue-600/25 border border-blue-600/20 text-blue-600 dark:text-[#b4c5ff] font-bold" : "text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-gray-50 dark:hover:bg-white/5"}`}>
+                                        <button key={tab.id} onClick={() => { setCurrentTab(tab.id); setIsAdminMode(false); }} class={`w-full flex items-center gap-3 p-3 rounded-[14px] transition whitespace-nowrap overflow-hidden ${currentTab === tab.id && !isAdminMode ? "bg-blue-600/10 dark:bg-blue-600/25 border border-blue-600/20 text-blue-600 dark:text-[#b4c5ff] font-bold" : "text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-gray-50 dark:hover:bg-white/5"}`}>
                                             <i class={`ph ${tab.icon} shrink-0 text-[20px]`}></i>
                                             <span class="opacity-0 w-0 invisible group-hover/sidebar:opacity-100 group-hover/sidebar:w-auto group-hover/sidebar:visible whitespace-nowrap overflow-hidden text-ellipsis transition-all duration-300">{tab.label}</span>
                                         </button>
                                     ))}
                                 </nav>
                                 <div class="px-3 mt-auto pt-4 border-t border-gray-100 dark:border-white/5 space-y-2 overflow-hidden w-full shrink-0">
+                                    
+                                    {/* PHASE 1: CONDITIONAL NAVIGATION ENTRY FOR AUTHENTICATED OFFICERS */}
+                                    {isUserAdminOfficer && (
+                                        <button onClick={() => setIsAdminMode(!isAdminMode)} class={`w-full flex items-center gap-3 p-3 rounded-[14px] transition whitespace-nowrap overflow-hidden ${isAdminMode ? "bg-amber-500/10 dark:bg-amber-500/20 border border-amber-500/30 text-amber-500 font-bold" : "text-gray-500 dark:text-gray-400 hover:text-amber-500 hover:bg-gray-50 dark:hover:bg-white/5"}`}>
+                                            <i class="ph ph-key shrink-0 text-[20px] animate-pulse"></i>
+                                            <span class="opacity-0 w-0 invisible group-hover/sidebar:opacity-100 group-hover/sidebar:w-auto group-hover/sidebar:visible whitespace-nowrap overflow-hidden transition-all duration-300">Admin Console</span>
+                                        </button>
+                                    )}
+
                                     <button onClick={() => setIsDark(!isDark)} class="w-full flex items-center gap-3 p-3 rounded-[14px] hover:bg-gray-50 dark:hover:bg-white/5 text-gray-500 dark:text-gray-400 font-bold transition whitespace-nowrap overflow-hidden">
                                         <i class={`ph ${isDark ? 'ph-sun' : 'ph-moon'} shrink-0 text-[20px]`}></i>
                                         <span class="opacity-0 w-0 invisible group-hover/sidebar:opacity-100 group-hover/sidebar:w-auto group-hover/sidebar:visible whitespace-nowrap overflow-hidden transition-all duration-300">{isDark ? 'Light Mode' : 'Dark Mode'}</span>
@@ -455,11 +596,15 @@
                             {/* CORE CONTROL WORKSPACE LAYOUT PANELS */}
                             <main class="flex-1 flex flex-col relative min-h-screen transition-all duration-300 ease-in-out md:ml-20">
                                 
-                                {/* HEADER COMPONENT LAYOUT */}
+                                {/* HEADER BLOCK */}
                                 <header class="sticky top-0 z-40 flex flex-col w-full bg-white dark:bg-[#0c0d12] glass-panel border-b border-gray-100 dark:border-white/5 shadow-sm">
                                     <div class="flex flex-col lg:flex-row lg:items-center justify-between px-6 py-4 gap-4 w-full pl-6 md:pl-8">
                                         <div class="flex items-center justify-between w-full lg:w-auto">
-                                            <h2 class="font-bold text-lg md:text-xl font-display tracking-tight text-gray-900 dark:text-white">{TabNames[currentTab]}</h2>
+                                            <h2 class="font-bold text-lg md:text-xl font-display tracking-tight text-gray-900 dark:text-white">
+                                                {isAdminMode ? "Admin Control Console" : TabNames[currentTab]}
+                                            </h2>
+                                            
+                                            {/* Mobile Active Identity Indicator Badge */}
                                             <div class="lg:hidden flex items-center gap-2 bg-blue-600/10 dark:bg-blue-600/20 border border-blue-600/30 dark:border-blue-600/40 px-3 py-1.5 rounded-full shadow-[0_2px_10px_rgba(59,130,246,0.1)] shrink-0">
                                                 <span class="relative flex h-2 w-2">
                                                     <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
@@ -472,7 +617,7 @@
                                         </div>
                                         
                                         <div class="flex flex-wrap items-center gap-3 w-full lg:w-auto lg:ml-auto">
-                                            {["Note", "Sud_An", "Fresh_Sud_An", "Questionnaire", "folders"].includes(currentTab) && (
+                                            {["Note", "Sud_An", "Fresh_Sud_An", "Questionnaire", "folders"].includes(currentTab) && !isAdminMode && (
                                                 <div class="flex flex-row items-center gap-2.5 w-full lg:w-auto">
                                                     <div class="flex bg-gray-50 dark:bg-[#16171d] p-1 rounded-full border border-gray-100 dark:border-white/5 shadow-inner flex-1 sm:flex-initial justify-around">
                                                         {["Sanare", "Manus", "Vesties"].map(b => (
@@ -487,6 +632,7 @@
                                                 </div>
                                             )}
 
+                                            {/* Desktop Premium Identity Badge with live pulsing indicator */}
                                             <div class="hidden lg:flex items-center gap-2.5 bg-blue-600/10 dark:bg-blue-600/20 border border-blue-600/30 dark:border-blue-600/40 px-4 py-2 rounded-full shadow-[0_2px_10px_rgba(59,130,246,0.1)] shrink-0 global-transition hover:scale-105">
                                                 <span class="relative flex h-2 w-2">
                                                     <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
@@ -502,384 +648,556 @@
 
                                 <div class="flex-1 w-full relative p-6 md:p-8 max-w-[1600px] mx-auto pb-32 pl-6 md:pl-10">
                                     
-                                    {/* COMPONENT MODULE: OVERVIEW DASHBOARD */}
-                                    {currentTab === "dashboard" && (
-                                        <div class="space-y-6 text-left max-w-5xl mx-auto animate-fade-in">
+                                    {/* --- OPTION C: IN-APP ADMIN PANEL WORKSPACE --- */}
+                                    {isAdminMode && isUserAdminOfficer ? (
+                                        <div class="max-w-4xl mx-auto space-y-10 text-left animate-fade-in pb-12">
                                             
-                                            <div class="glass-panel bg-gradient-to-r from-blue-900/40 via-[#0e131f] to-[#0e131f] border border-blue-500/20 rounded-[28px] p-6 shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-                                                <div class="flex items-center gap-4">
-                                                    <div class="w-12 h-12 rounded-2xl bg-blue-600/10 border border-blue-500/30 flex items-center justify-center text-blue-400 shrink-0 shadow-inner">
-                                                        <i class="ph ph-sparkle text-2xl animate-pulse"></i>
-                                                    </div>
-                                                    <div>
-                                                        <span class="text-[10px] font-black tracking-widest uppercase text-blue-400 font-mono">Next Class Spotlight</span>
-                                                        <h3 class="text-xl font-bold tracking-tight text-gray-900 dark:text-white font-display mt-0.5">
-                                                            {currentActiveSpotlightEvent ? currentActiveSpotlightEvent.event_title : "No upcoming events scheduled"}
-                                                        </h3>
-                                                        <p class="text-xs font-medium text-gray-500 dark:text-gray-400 mt-0.5">
-                                                            {currentActiveSpotlightEvent ? `Timeline slot flagged for today's active schedule run.` : "Your immediate clinical timeline is fully clear."}
-                                                        </p>
-                                                    </div>
-                                                </div>
-                                                {currentActiveSpotlightEvent && (
-                                                    <div class="px-3.5 py-1.5 rounded-xl bg-blue-500/10 border border-blue-500/20 font-mono text-xs font-bold text-blue-400">
-                                                        {currentActiveSpotlightEvent.event_date}
-                                                    </div>
-                                                )}
+                                            {/* HEADER ADVICE */}
+                                            <div class="p-6 rounded-[24px] bg-amber-500/10 border border-amber-500/20 glass-panel">
+                                                <h3 class="text-base font-bold text-amber-500 flex items-center gap-2 font-display">
+                                                    <i class="ph ph-shield-check text-xl"></i>
+                                                    Authenticated Class Officer Session
+                                                </h3>
+                                                <p class="text-xs text-gray-500 dark:text-gray-400 font-medium leading-relaxed mt-1">
+                                                    You are currently signed in as <span class="font-mono text-blue-400 font-semibold">{currentUserEmail}</span>. Changes made through these custom sanitized forms write directly to production and synchronize to your classmates instantaneously.
+                                                </p>
                                             </div>
 
-                                            <div class="bg-white dark:bg-[#0e131f] border border-gray-100 dark:border-blue-500/10 rounded-tl-[48px] rounded-tr-[32px] rounded-br-[32px] rounded-bl-[32px] p-6 md:p-8 shadow-none glass-panel">
-                                                <div class="flex items-start gap-4">
-                                                    <div class="p-3 bg-blue-600/10 rounded-[14px] text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0">
-                                                        <i class="ph ph-megaphone text-2xl"></i>
+                                            {/* GRID MODULES FOR INPUTS */}
+                                            <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+                                                
+                                                {/* FORM 1: TYPO-PROOF ACADEMIC RESOURCE PUBLISHER */}
+                                                <div class="p-6 rounded-[28px] bg-white dark:bg-[#0e131f] border border-gray-100 dark:border-blue-500/10 shadow-sm space-y-4">
+                                                    <div class="flex items-center gap-2.5 border-b border-gray-100 dark:border-white/5 pb-3">
+                                                        <div class="w-8 h-8 rounded-lg bg-blue-500/10 flex items-center justify-center text-blue-500"><i class="ph ph-cloud-arrow-up text-lg"></i></div>
+                                                        <h3 class="font-display font-bold text-gray-900 dark:text-white">Upload Study Asset</h3>
                                                     </div>
-                                                    <div class="flex-1 space-y-1">
-                                                        <div class="flex flex-col sm:flex-row justify-between sm:items-center gap-1">
-                                                            <h3 class="text-lg font-bold tracking-tight text-gray-900 dark:text-white font-display">Latest Bulletin Notice</h3>
-                                                            {announcement && <span class="text-xs font-normal text-gray-400 dark:text-gray-500">{announcement.date_posted}</span>}
+                                                    <form onSubmit={handlePublishAsset} class="space-y-3 text-xs">
+                                                        <div>
+                                                            <label class="block font-bold text-gray-400 mb-1.5 uppercase tracking-wider">Classification Tab</label>
+                                                            <select value={assetForm.resource_type} onChange={e => setAssetForm({...assetForm, resource_type: e.target.value})} class="w-full bg-gray-50 dark:bg-[#16171d] border border-gray-200 dark:border-white/5 rounded-xl px-3 py-2 text-xs font-semibold focus:ring-blue-600 focus:border-transparent">
+                                                                <option value="Note">Lecture Notes</option>
+                                                                <option value="Sud_An">Recalls Archives</option>
+                                                                <option value="Fresh_Sud_An">New Recalls (Fresh)</option>
+                                                                <option value="Questionnaire">Interactive Quizzes</option>
+                                                            </select>
                                                         </div>
-                                                        <p class="text-sm font-medium text-gray-700 dark:text-gray-300 leading-relaxed mt-2">
-                                                            {announcement ? announcement.announcement_text : "No active bulletin notices at this time. Check back later for updates."}
-                                                        </p>
-                                                    </div>
-                                                </div>
-                                            </div>
-
-                                            <div class="bg-white dark:bg-[#0e131f] border border-gray-100 dark:border-blue-500/10 rounded-[32px] p-6 shadow-none glass-panel space-y-4">
-                                                <div class="flex items-center gap-3 border-b border-gray-100 dark:border-white/5 pb-4">
-                                                    <i class="ph ph-calendar-clock text-blue-600 dark:text-blue-400 text-2xl"></i>
-                                                    <h2 class="text-xl font-semibold tracking-tight text-gray-900 dark:text-white font-display">Weekly Timetable Schedule</h2>
-                                                </div>
-                                                <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4">
-                                                    {daysNames.map((day, idx) => {
-                                                        const i = idx + 1;
-                                                        const dayEvents = weeklySchedule.filter(item => item.day_of_week === i);
-                                                        
-                                                        let heatmapStyle = "";
-                                                        let badgeStyle = "";
-                                                        if (i < currentDayInt) {
-                                                            heatmapStyle = "bg-gray-50 dark:bg-[#16171d]/40 border-gray-100 dark:border-white/5 opacity-40 select-none";
-                                                            badgeStyle = "text-gray-400 dark:text-gray-600 font-bold";
-                                                        } else if (i === currentDayInt) {
-                                                            heatmapStyle = "bg-blue-600/10 dark:bg-blue-600/20 border-blue-600/40 dark:border-blue-500/40 ring-1 ring-blue-600/20 shadow-[0_0_15px_rgba(59,130,246,0.15)]";
-                                                            badgeStyle = "text-blue-600 dark:text-[#b4c5ff] font-black";
-                                                        } else {
-                                                            heatmapStyle = "bg-white dark:bg-[#0e131f] border border-gray-100 dark:border-blue-500/10";
-                                                            badgeStyle = "text-gray-500 dark:text-gray-400 font-bold";
-                                                        }
-
-                                                        return (
-                                                            <div key={day} class={`rounded-[20px] p-4 border flex flex-col min-h-[140px] transition ${heatmapStyle}`}>
-                                                                <h4 class={`text-xs uppercase tracking-wider ${badgeStyle}`}>{day}</h4>
-                                                                {dayEvents.length === 0 ? (
-                                                                    <p class="text-xs font-normal text-gray-400 dark:text-gray-500 italic pt-3">Clear Schedule</p>
-                                                                ) : dayEvents.map((ev, eIdx) => (
-                                                                    <div key={eIdx} class="border-t border-gray-100 dark:border-white/5 mt-2 pt-2 space-y-1">
-                                                                        <p class="text-xs font-medium text-gray-900 dark:text-gray-200 whitespace-normal break-words leading-tight">{ev.event_title}</p>
-                                                                        <p class="text-xs font-normal text-gray-400 dark:text-gray-500 font-mono">{ev.event_date}</p>
-                                                                    </div>
-                                                                ))}
+                                                        <div class="grid grid-cols-2 gap-3">
+                                                            <div>
+                                                                <label class="block font-bold text-gray-400 mb-1.5 uppercase tracking-wider">Target Batch</label>
+                                                                <select value={assetForm.batch} onChange={e => setAssetForm({...assetForm, batch: e.target.value})} class="w-full bg-gray-50 dark:bg-[#16171d] border border-gray-200 dark:border-white/5 rounded-xl px-3 py-2 text-xs font-semibold">
+                                                                    <option value="Sanare">Sanare</option>
+                                                                    <option value="Manus">Manus</option>
+                                                                    <option value="Vesties">Vesties</option>
+                                                                </select>
                                                             </div>
-                                                        );
-                                                    })}
+                                                            <div>
+                                                                <label class="block font-bold text-gray-400 mb-1.5 uppercase tracking-wider">Semester</label>
+                                                                <select value={assetForm.semester} onChange={e => setAssetForm({...assetForm, semester: e.target.value})} class="w-full bg-gray-50 dark:bg-[#16171d] border border-gray-200 dark:border-white/5 rounded-xl px-3 py-2 text-xs font-semibold">
+                                                                    <option value="1st Semester">1st Semester</option>
+                                                                    <option value="2nd Semester">2nd Semester</option>
+                                                                </select>
+                                                            </div>
+                                                        </div>
+                                                        <div class="grid grid-cols-2 gap-3">
+                                                            <div>
+                                                                <label class="block font-bold text-gray-400 mb-1.5 uppercase tracking-wider">Subject Folder</label>
+                                                                <select value={assetForm.subject} onChange={e => setAssetForm({...assetForm, subject: e.target.value})} class="w-full bg-gray-50 dark:bg-[#16171d] border border-gray-200 dark:border-white/5 rounded-xl px-3 py-2 text-xs font-semibold">
+                                                                    <option value="Anatomy">Anatomy</option>
+                                                                    <option value="Pharmacology">Pharmacology</option>
+                                                                    <option value="Pathology">Pathology</option>
+                                                                    <option value="Biochemistry">Biochemistry</option>
+                                                                    <option value="Histology">Histology</option>
+                                                                    <option value="Microbiology & Parasitology">Microbiology & Parasitology</option>
+                                                                    <option value="Family Community Medicine II">Family Community Medicine II (FCM II)</option>
+                                                                    <option value="Obstetrics & Gynecology">Obstetrics & Gynecology</option>
+                                                                    <option value="Pediatrics">Pediatrics</option>
+                                                                    <option value="Surgery">Surgery</option>
+                                                                    <option value="Clinical Medicine">Clinical Medicine</option>
+                                                                    <option value="Psychiatry">Psychiatry</option>
+                                                                </select>
+                                                            </div>
+                                                            <div>
+                                                                <label class="block font-bold text-gray-400 mb-1.5 uppercase tracking-wider">Academic Block</label>
+                                                                <select value={assetForm.block} onChange={e => setAssetForm({...assetForm, block: e.target.value})} class="w-full bg-gray-50 dark:bg-[#16171d] border border-gray-200 dark:border-white/5 rounded-xl px-3 py-2 text-xs font-semibold">
+                                                                    <option value="Block 1">Block 1</option>
+                                                                    <option value="Block 2">Block 2</option>
+                                                                    <option value="Block 3">Block 3</option>
+                                                                    <option value="Block 4">Block 4</option>
+                                                                    <option value="Block 5">Block 5</option>
+                                                                    <option value="Block 6">Block 6</option>
+                                                                    <option value="Block 7">Block 7</option>
+                                                                    <option value="Block 8">Block 8</option>
+                                                                </select>
+                                                            </div>
+                                                        </div>
+                                                        <div>
+                                                            <label class="block font-bold text-gray-400 mb-1.5 uppercase tracking-wider">Topic Title</label>
+                                                            <input type="text" placeholder="e.g. Cardiovascular Pathology" value={assetForm.topic} onChange={e => setAssetForm({...assetForm, topic: e.target.value})} class="w-full bg-gray-50 dark:bg-[#16171d] border border-gray-200 dark:border-white/5 rounded-xl px-3 py-2 text-xs font-semibold focus:ring-blue-600 focus:border-transparent text-gray-900 dark:text-white" />
+                                                        </div>
+                                                        <div>
+                                                            <label class="block font-bold text-gray-400 mb-1.5 uppercase tracking-wider">Asset Link (Google Drive / G-Docs / Google Forms)</label>
+                                                            <input type="text" placeholder="Paste link here..." value={assetForm.file_link} onChange={e => setAssetForm({...assetForm, file_link: e.target.value})} class="w-full bg-gray-50 dark:bg-[#16171d] border border-gray-200 dark:border-white/5 rounded-xl px-3 py-2 text-xs font-semibold focus:ring-blue-600 focus:border-transparent text-gray-900 dark:text-white" />
+                                                        </div>
+                                                        <button type="submit" disabled={isPublishing} class="w-full py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl shadow-md transition-all flex items-center justify-center gap-2">
+                                                            {isPublishing ? <span class="animate-spin h-3.5 w-3.5 border-2 border-white border-t-transparent rounded-full"></span> : <i class="ph ph-check-square"></i>}
+                                                            <span>{isPublishing ? "Publishing Live..." : "Publish to Library"}</span>
+                                                        </button>
+                                                    </form>
+                                                </div>
+
+                                                {/* DUAL MODULE BAR: BILLBOARDS & TIMETABLES */}
+                                                <div class="space-y-6 flex flex-col justify-between">
+                                                    
+                                                    {/* FORM 2: ANNOUNCEMENT BULLETIN PANEL */}
+                                                    <div class="p-6 rounded-[28px] bg-white dark:bg-[#0e131f] border border-gray-100 dark:border-blue-500/10 shadow-sm space-y-4 flex-1">
+                                                        <div class="flex items-center gap-2.5 border-b border-gray-100 dark:border-white/5 pb-3">
+                                                            <div class="w-8 h-8 rounded-lg bg-emerald-500/10 flex items-center justify-center text-emerald-500"><i class="ph ph-megaphone-simple text-lg"></i></div>
+                                                            <h3 class="font-display font-bold text-gray-900 dark:text-white">Push Bulletin Announcement</h3>
+                                                        </div>
+                                                        <form onSubmit={handlePublishBulletin} class="space-y-3 text-xs">
+                                                            <div>
+                                                                <label class="block font-bold text-gray-400 mb-1.5 uppercase tracking-wider">Announcement Message (Supports Line Breaks)</label>
+                                                                <textarea rows="4" placeholder="Type announcement notices..." value={bulletinForm.announcement_text} onChange={e => setBulletinForm({...bulletinForm, announcement_text: e.target.value})} class="w-full bg-gray-50 dark:bg-[#16171d] border border-gray-200 dark:border-white/5 rounded-xl px-3 py-2 text-xs font-semibold focus:ring-blue-600 focus:border-transparent text-gray-900 dark:text-white resize-none"></textarea>
+                                                            </div>
+                                                            <div>
+                                                                <label class="block font-bold text-gray-400 mb-1.5 uppercase tracking-wider">Date/Time Stamp Override (Optional)</label>
+                                                                <input type="text" placeholder="e.g. Today, 2:30 PM (Leave blank for actual system clock time)" value={bulletinForm.date_posted} onChange={e => setBulletinForm({...bulletinForm, date_posted: e.target.value})} class="w-full bg-gray-50 dark:bg-[#16171d] border border-gray-200 dark:border-white/5 rounded-xl px-3 py-2 text-xs font-semibold focus:ring-blue-600 focus:border-transparent text-gray-900 dark:text-white" />
+                                                            </div>
+                                                            <button type="submit" disabled={isPublishing} class="w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl shadow-md transition-all flex items-center justify-center gap-2">
+                                                                {isPublishing ? <span class="animate-spin h-3.5 w-3.5 border-2 border-white border-t-transparent rounded-full"></span> : <i class="ph ph-bell"></i>}
+                                                                <span>{isPublishing ? "Publishing Live..." : "Publish Live Bulletin"}</span>
+                                                            </button>
+                                                        </form>
+                                                    </div>
+
+                                                    {/* FORM 3: SPOTLIGHT CLASS EVENT WRITER */}
+                                                    <div class="p-6 rounded-[28px] bg-white dark:bg-[#0e131f] border border-gray-100 dark:border-blue-500/10 shadow-sm space-y-4 flex-1">
+                                                        <div class="flex items-center gap-2.5 border-b border-gray-100 dark:border-white/5 pb-3">
+                                                            <div class="w-8 h-8 rounded-lg bg-amber-500/10 flex items-center justify-center text-amber-500"><i class="ph ph-calendar-blank text-lg"></i></div>
+                                                            <h3 class="font-display font-bold text-gray-900 dark:text-white">Map Timetable Event</h3>
+                                                        </div>
+                                                        <form onSubmit={handlePublishSchedule} class="space-y-3 text-xs">
+                                                            <div class="grid grid-cols-2 gap-3">
+                                                                <div>
+                                                                    <label class="block font-bold text-gray-400 mb-1.5 uppercase tracking-wider">Target Day</label>
+                                                                    <select value={scheduleForm.day_of_week} onChange={e => setScheduleForm({...scheduleForm, day_of_week: parseInt(e.target.value)})} class="w-full bg-gray-50 dark:bg-[#16171d] border border-gray-200 dark:border-white/5 rounded-xl px-3 py-2 text-xs font-semibold">
+                                                                        <option value={1}>Monday</option>
+                                                                        <option value={2}>Tuesday</option>
+                                                                        <option value={3}>Wednesday</option>
+                                                                        <option value={4}>Thursday</option>
+                                                                        <option value={5}>Friday</option>
+                                                                        <option value={6}>Saturday</option>
+                                                                        <option value={7}>Sunday</option>
+                                                                    </select>
+                                                                </div>
+                                                                <div>
+                                                                    <label class="block font-bold text-gray-400 mb-1.5 uppercase tracking-wider">Schedule Time Frame</label>
+                                                                    <input type="text" placeholder="e.g. 8:00 AM - 10:00 AM" value={scheduleForm.event_date} onChange={e => setScheduleForm({...scheduleForm, event_date: e.target.value})} class="w-full bg-gray-50 dark:bg-[#16171d] border border-gray-200 dark:border-white/5 rounded-xl px-3 py-2 text-xs font-semibold focus:ring-blue-600 focus:border-transparent text-gray-900 dark:text-white" />
+                                                                </div>
+                                                            </div>
+                                                            <div>
+                                                                <label class="block font-bold text-gray-400 mb-1.5 uppercase tracking-wider">Class/Event Title Name</label>
+                                                                <input type="text" placeholder="e.g. Family Medicine II Lecture" value={scheduleForm.event_title} onChange={e => setScheduleForm({...scheduleForm, event_title: e.target.value})} class="w-full bg-gray-50 dark:bg-[#16171d] border border-gray-200 dark:border-white/5 rounded-xl px-3 py-2 text-xs font-semibold focus:ring-blue-600 focus:border-transparent text-gray-900 dark:text-white" />
+                                                            </div>
+                                                            <button type="submit" disabled={isPublishing} class="w-full py-2.5 bg-amber-600 hover:bg-amber-500 text-white font-bold rounded-xl shadow-md transition-all flex items-center justify-center gap-2">
+                                                                {isPublishing ? <span class="animate-spin h-3.5 w-3.5 border-2 border-white border-t-transparent rounded-full"></span> : <i class="ph ph-calendar-plus"></i>}
+                                                                <span>{isPublishing ? "Publishing Live..." : "Map Class Schedule"}</span>
+                                                            </button>
+                                                        </form>
+                                                    </div>
                                                 </div>
                                             </div>
                                         </div>
-                                    )}
-
-                                    {/* COMPONENT MODULE: MEDICAL BOOKS MATRICES */}
-                                    {currentTab === "books" && (
-                                        <div class="text-left w-full h-full global-transition">
-                                            <div class="mb-6 text-left max-w-5xl mx-auto flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                                                <div>
-                                                    <h2 class="font-display text-3xl font-black text-gray-900 dark:text-white tracking-tight mb-1">Subject Libraries</h2>
-                                                    <p class="text-gray-500 dark:text-gray-400 text-sm font-medium">Search matching system reference volumes instantly.</p>
-                                                </div>
-                                                <div class="relative w-full sm:w-80 shrink-0">
-                                                    <i class="ph ph-magnifying-glass absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500 text-base"></i>
-                                                    <input type="text" placeholder="Type specific book name..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} class="w-full pl-11 pr-4 py-2.5 rounded-full bg-white dark:bg-[#0e131f] border border-gray-200 dark:border-blue-500/10 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 shadow-sm transition-all" />
-                                                    {searchQuery && <button onClick={() => setSearchQuery("")} class="ph ph-x absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-white text-xs font-bold"></button>}
-                                                </div>
-                                            </div>
-
-                                            {searchQuery.trim() ? (
-                                                <div class="max-w-5xl mx-auto space-y-3 animate-fade-in">
-                                                    <h3 class="text-xs font-black text-gray-400 uppercase tracking-widest pl-1 mb-4">Deep Book Results ({searDeepBooks.length ?? searchedDeepBooks.length})</h3>
-                                                    {searchedDeepBooks.length === 0 ? (
-                                                        <div class="text-center text-sm text-gray-500 italic py-12 bg-white dark:bg-[#0e131f] border border-dashed border-gray-200 dark:border-blue-500/10 rounded-2xl">No documents matched your specific key search phrase.</div>
-                                                    ) : searchedDeepBooks.map((b, idx) => {
-                                                        const routes = resolveDriveLinks(b.drive_link);
-                                                        return (
-                                                            <div key={idx} class="group flex items-center justify-between p-4 rounded-[16px] bg-white dark:bg-[#0e131f] border border-gray-100 dark:border-blue-500/10 hover:border-blue-500/30 hover:translate-x-1 border-l-2 border-l-transparent hover:border-l-blue-500 global-transition shadow-sm gap-3">
-                                                                <div class="flex items-center gap-3.5 flex-1 min-w-0">
-                                                                    <div class="w-9 h-9 rounded-lg bg-blue-600/10 flex items-center justify-center text-blue-500 shrink-0"><i class="ph ph-book-open text-lg"></i></div>
-                                                                    <div class="flex flex-col min-w-0"><span class="text-sm font-bold text-gray-900 dark:text-white leading-tight truncate">{b.book_name}</span><span class="text-[10px] font-medium text-gray-400 dark:text-gray-500 mt-0.5 tracking-wide uppercase font-mono">{b.subject}</span></div>
-                                                                </div>
-                                                                <div class="flex items-center gap-1.5 shrink-0">
-                                                                    <a href={routes.preview} target="_blank" class="w-9 h-9 rounded-lg bg-gray-50 dark:bg-white/5 flex items-center justify-center text-gray-600 dark:text-gray-300 hover:bg-blue-600/20 hover:text-blue-500 global-transition"><i class="ph ph-eye text-base"></i></a>
-                                                                    <button onClick={() => { triggerSystemToastAlert(b.book_name); window.open(routes.download, '_blank'); }} class="w-9 h-9 rounded-lg bg-gray-50 dark:bg-white/5 flex items-center justify-center text-gray-600 dark:text-gray-300 hover:bg-emerald-500/20 hover:text-emerald-500 global-transition"><i class="ph ph-download text-base"></i></button>
-                                                                </div>
+                                    ) : (
+                                        /* TRADITIONAL TAB INTERFACES */
+                                        <React.Fragment>
+                                            
+                                            {/* OVERVIEW TAB RESTORED */}
+                                            {currentTab === "dashboard" && (
+                                                <div class="space-y-6 text-left max-w-5xl mx-auto animate-fade-in">
+                                                    
+                                                    {/* NEXT CLASS SPOTLIGHT HIGHLIGHTER BANNER */}
+                                                    <div class="glass-panel bg-gradient-to-r from-blue-900/40 via-[#0e131f] to-[#0e131f] border border-blue-500/20 rounded-[28px] p-6 shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+                                                        <div class="flex items-center gap-4">
+                                                            <div class="w-12 h-12 rounded-2xl bg-blue-600/10 border border-blue-500/30 flex items-center justify-center text-blue-400 shrink-0 shadow-inner">
+                                                                <i class="ph ph-sparkle text-2xl animate-pulse"></i>
                                                             </div>
-                                                        );
-                                                    })}
-                                                </div>
-                                            ) : (
-                                                <div class="w-full">
-                                                    {!activeSubject ? (
-                                                        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 max-w-5xl mx-auto animate-fade-in">
-                                                            {Object.keys(groupedBooks).sort().map(subj => {
-                                                                const iData = getSubjectIconData(subj);
+                                                            <div>
+                                                                <span class="text-[10px] font-black tracking-widest uppercase text-blue-400 font-mono">Next Class Spotlight</span>
+                                                                <h3 class="text-xl font-bold tracking-tight text-gray-900 dark:text-white font-display mt-0.5">
+                                                                    {currentActiveSpotlightEvent ? currentActiveSpotlightEvent.event_title : "No upcoming events scheduled"}
+                                                                </h3>
+                                                                <p class="text-xs font-medium text-gray-500 dark:text-gray-400 mt-0.5">
+                                                                    {currentActiveSpotlightEvent ? `Timeline slot flagged for today's active schedule run.` : "Your immediate clinical timeline is fully clear."}
+                                                                </p>
+                                                            </div>
+                                                        </div>
+                                                        {currentActiveSpotlightEvent && (
+                                                            <div class="px-3.5 py-1.5 rounded-xl bg-blue-500/10 border border-blue-500/20 font-mono text-xs font-bold text-blue-400">
+                                                                {currentActiveSpotlightEvent.event_date}
+                                                            </div>
+                                                        )}
+                                                    </div>
+
+                                                    {/* BULLETIN SUMMARY ANNOUNCEMENT NODE (WITH PRE-LINE LINEBREAK SUPPORT) */}
+                                                    <div class="bg-white dark:bg-[#0e131f] border border-gray-100 dark:border-blue-500/10 rounded-tl-[48px] rounded-tr-[32px] rounded-br-[32px] rounded-bl-[32px] p-6 md:p-8 shadow-none glass-panel">
+                                                        <div class="flex items-start gap-4">
+                                                            <div class="p-3 bg-blue-600/10 rounded-[14px] text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0">
+                                                                <i class="ph ph-megaphone text-2xl"></i>
+                                                            </div>
+                                                            <div class="flex-1 space-y-1">
+                                                                <div class="flex flex-col sm:flex-row justify-between sm:items-center gap-1">
+                                                                    <h3 class="text-lg font-bold tracking-tight text-gray-900 dark:text-white font-display">Latest Bulletin Notice</h3>
+                                                                    {announcement && <span class="text-xs font-normal text-gray-400 dark:text-gray-500">{announcement.date_posted}</span>}
+                                                                </div>
+                                                                <p class="text-sm font-medium text-gray-700 dark:text-gray-300 leading-relaxed mt-2 whitespace-pre-line">
+                                                                    {announcement ? announcement.announcement_text : "No active bulletin notices at this time. Check back later for updates."}
+                                                                </p>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+
+                                                    {/* WEEKLY CALENDAR OVERVIEW HEATMAPS */}
+                                                    <div class="bg-white dark:bg-[#0e131f] border border-gray-100 dark:border-blue-500/10 rounded-[32px] p-6 shadow-none glass-panel space-y-4">
+                                                        <div class="flex items-center gap-3 border-b border-gray-100 dark:border-white/5 pb-4">
+                                                            <i class="ph ph-calendar-clock text-blue-600 dark:text-blue-400 text-2xl"></i>
+                                                            <h2 class="text-xl font-semibold tracking-tight text-gray-900 dark:text-white font-display">Weekly Timetable Schedule</h2>
+                                                        </div>
+                                                        <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4">
+                                                            {daysNames.map((day, idx) => {
+                                                                const i = idx + 1;
+                                                                const dayEvents = weeklySchedule.filter(item => item.day_of_week === i);
+                                                                
+                                                                let heatmapStyle = "";
+                                                                let badgeStyle = "";
+                                                                if (i < currentDayInt) {
+                                                                    heatmapStyle = "bg-gray-50 dark:bg-[#16171d]/40 border-gray-100 dark:border-white/5 opacity-40 select-none";
+                                                                    badgeStyle = "text-gray-400 dark:text-gray-600 font-bold";
+                                                                } else if (i === currentDayInt) {
+                                                                    heatmapStyle = "bg-blue-600/10 dark:bg-blue-600/20 border-blue-600/40 dark:border-blue-500/40 ring-1 ring-blue-600/20 shadow-[0_0_15px_rgba(59,130,246,0.15)]";
+                                                                    badgeStyle = "text-blue-600 dark:text-[#b4c5ff] font-black";
+                                                                } else {
+                                                                    heatmapStyle = "bg-white dark:bg-[#0e131f] border border-gray-100 dark:border-blue-500/10";
+                                                                    badgeStyle = "text-gray-500 dark:text-gray-400 font-bold";
+                                                                }
+
                                                                 return (
-                                                                    <button key={subj} onClick={() => setActiveSubject(subj)} class="glass-panel bg-white dark:bg-[#0e131f] border border-gray-100 dark:border-blue-500/10 shadow-sm rounded-[20px] p-4 flex flex-row items-center gap-4 group relative overflow-hidden text-left w-full hover:border-blue-500/40 dark:hover:border-blue-500/40 global-transition hover:shadow-md hover:-translate-y-0.5 min-h-[72px] dark:hover:shadow-[0_0_20px_rgba(59,130,246,0.05)]">
-                                                                        <div class={`w-11 h-11 rounded-[12px] flex items-center justify-center shadow-inner border border-black/5 dark:border-white/5 shrink-0 transition-transform group-hover:scale-105 ${iData.colorClass}`}><i class={`ph ${iData.icon} text-xl`}></i></div>
-                                                                        <div class="flex flex-col min-w-0 flex-1 justify-center"><h3 class="font-display text-sm font-bold text-gray-900 dark:text-white tracking-tight group-hover:text-blue-600 transition-colors whitespace-normal break-words leading-tight">{subj}</h3><p class="text-[11px] font-sans font-medium text-gray-400 dark:text-gray-500 tracking-wide mt-0.5 truncate">{groupedBooks[subj].length} Books</p></div>
-                                                                    </button>
+                                                                    <div key={day} class={`rounded-[20px] p-4 border flex flex-col min-h-[140px] transition ${heatmapStyle}`}>
+                                                                        <h4 class={`text-xs uppercase tracking-wider ${badgeStyle}`}>{day}</h4>
+                                                                        {dayEvents.length === 0 ? (
+                                                                            <p class="text-xs font-normal text-gray-400 dark:text-gray-500 italic pt-3">Clear Schedule</p>
+                                                                        ) : dayEvents.map((ev, eIdx) => (
+                                                                            <div key={eIdx} class="border-t border-gray-100 dark:border-white/5 mt-2 pt-2 space-y-1">
+                                                                                <p class="text-xs font-medium text-gray-900 dark:text-gray-200 whitespace-normal break-words leading-tight">{ev.event_title}</p>
+                                                                                <p class="text-xs font-normal text-gray-400 dark:text-gray-500 font-mono">{ev.event_date}</p>
+                                                                            </div>
+                                                                        ))}
+                                                                    </div>
+                                                                );
+                                                            })}
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            )}
+
+                                            {/* MODULE 2: MEDICAL BOOKS TAB */}
+                                            {currentTab === "books" && (
+                                                <div class="text-left w-full h-full global-transition">
+                                                    
+                                                    {/* DEEP SPECIFIC SEARCH MODULE STRIP (RECOMMENDATION 5) */}
+                                                    <div class="mb-6 text-left max-w-5xl mx-auto flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                                                        <div>
+                                                            <h2 class="font-display text-3xl font-black text-gray-900 dark:text-white tracking-tight mb-1">Subject Libraries</h2>
+                                                            <p class="text-gray-500 dark:text-gray-400 text-sm font-medium">Search matching system reference volumes instantly.</p>
+                                                        </div>
+                                                        <div class="relative w-full sm:w-80 shrink-0">
+                                                            <i class="ph ph-magnifying-glass absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500 text-base"></i>
+                                                            <input type="text" placeholder="Type specific book name..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} class="w-full pl-11 pr-4 py-2.5 rounded-full bg-white dark:bg-[#0e131f] border border-gray-200 dark:border-blue-500/10 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 shadow-sm transition-all" />
+                                                            {searchQuery && <button onClick={() => setSearchQuery("")} class="ph ph-x absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-white text-xs font-bold"></button>}
+                                                        </div>
+                                                    </div>
+
+                                                    {/* DEEP INTEGRATION MATCHING PORTAL */}
+                                                    {searchQuery.trim() ? (
+                                                        <div class="max-w-5xl mx-auto space-y-3 animate-fade-in">
+                                                            <h3 class="text-xs font-black text-gray-400 uppercase tracking-widest pl-1 mb-4">Deep Book Results ({searchedDeepBooks.length})</h3>
+                                                            {searchedDeepBooks.length === 0 ? (
+                                                                <div class="text-center text-sm text-gray-500 italic py-12 bg-white dark:bg-[#0e131f] border border-dashed border-gray-200 dark:border-blue-500/10 rounded-2xl">No documents matched your specific key search phrase.</div>
+                                                            ) : searchedDeepBooks.map((b, idx) => {
+                                                                const routes = resolveDriveLinks(b.drive_link);
+                                                                return (
+                                                                    <div key={idx} class="group flex items-center justify-between p-4 rounded-[16px] bg-white dark:bg-[#0e131f] border border-gray-100 dark:border-blue-500/10 hover:border-blue-500/30 hover:translate-x-1 border-l-2 border-l-transparent hover:border-l-blue-500 global-transition shadow-sm gap-3">
+                                                                        <div class="flex items-center gap-3.5 flex-1 min-w-0">
+                                                                            <div class="w-9 h-9 rounded-lg bg-blue-600/10 flex items-center justify-center text-blue-500 shrink-0"><i class="ph ph-book-open text-lg"></i></div>
+                                                                            <div class="flex flex-col min-w-0">
+                                                                                <span class="text-sm font-bold text-gray-900 dark:text-white leading-tight truncate">{b.book_name}</span>
+                                                                                <span class="text-[10px] font-medium text-gray-400 dark:text-gray-500 mt-0.5 tracking-wide uppercase font-mono">{b.subject}</span>
+                                                                            </div>
+                                                                        </div>
+                                                                        <div class="flex items-center gap-1.5 shrink-0">
+                                                                            <a href={routes.preview} target="_blank" class="w-9 h-9 rounded-lg bg-gray-50 dark:bg-white/5 flex items-center justify-center text-gray-600 dark:text-gray-300 hover:bg-blue-600/20 hover:text-blue-500 global-transition"><i class="ph ph-eye text-base"></i></a>
+                                                                            <button onClick={() => { triggerSystemToastAlert(b.book_name); window.open(routes.download, '_blank'); }} class="w-9 h-9 rounded-lg bg-gray-50 dark:bg-white/5 flex items-center justify-center text-gray-600 dark:text-gray-300 hover:bg-emerald-500/20 hover:text-emerald-500 global-transition"><i class="ph ph-download text-base"></i></button>
+                                                                        </div>
+                                                                    </div>
                                                                 );
                                                             })}
                                                         </div>
                                                     ) : (
-                                                        <div class="flex flex-col md:flex-row gap-8 w-full max-w-6xl mx-auto">
-                                                            <div class="w-full md:w-64 shrink-0 flex flex-col gap-2 sticky top-28 h-fit z-10">
-                                                                <h3 class="text-[10px] font-black uppercase tracking-widest text-gray-400 dark:text-gray-500 pl-3 mb-2">Course Modules</h3>
-                                                                {Object.keys(groupedBooks).sort().map(subj => {
-                                                                    const iData = getSubjectIconData(subj);
-                                                                    return (
-                                                                        <button key={subj} onClick={() => setActiveSubject(subj)} class={`w-full text-left px-4 py-3 rounded-[14px] global-transition font-bold text-sm flex items-center gap-2 ${subj === activeSubject ? 'bg-blue-600 text-white shadow-md' : 'hover:bg-gray-200/60 dark:hover:bg-white/10 text-gray-600 dark:text-gray-400'}`}><i class={`ph ${iData.icon} text-base shrink-0 ${subj === activeSubject ? 'text-white' : ''}`}></i><span class="truncate">{subj}</span></button>
-                                                                    );
-                                                                })}
-                                                            </div>
-                                                            <div class="flex-1 space-y-6">
-                                                                <div class="flex items-center gap-4">
-                                                                    <button onClick={() => setActiveSubject(null)} class="w-10 h-10 rounded-full bg-white dark:bg-[#0e131f] border border-gray-100 dark:border-blue-500/10 flex items-center justify-center text-gray-500 dark:text-gray-400 hover:text-blue-600 transition shadow-sm"><i class="ph ph-arrow-left text-lg font-bold"></i></button>
-                                                                    <h1 class="font-display text-3xl font-black text-gray-900 dark:text-white tracking-tight">{activeSubject}</h1>
-                                                                </div>
-                                                                <div class="grid grid-cols-1 xl:grid-cols-2 gap-4">
-                                                                    {groupedBooks[activeSubject].map((b, idx) => {
-                                                                        const routes = resolveDriveLinks(b.drive_link);
+                                                        <div class="w-full">
+                                                            {!activeSubject ? (
+                                                                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 max-w-5xl mx-auto animate-fade-in">
+                                                                    {Object.keys(groupedBooks).sort().map(subj => {
+                                                                        const iData = getSubjectIconData(subj);
                                                                         return (
-                                                                            <div key={idx} class="group flex items-center justify-between p-5 rounded-[20px] bg-white dark:bg-[#0e131f] border border-gray-100 dark:border-blue-500/10 hover:border-gray-200 dark:hover:border-white/10 shadow-sm global-transition h-full">
-                                                                                <div class="flex items-center gap-4 w-[75%]"><div class="w-10 h-10 rounded-[14px] bg-gray-50 dark:bg-white/5 flex items-center justify-center border border-gray-100 dark:border-white/5 shrink-0"><i class="ph ph-book-open text-gray-400 dark:text-gray-500 text-[20px]"></i></div><span class="text-sm text-gray-900 dark:text-white font-bold whitespace-normal break-words leading-snug">{b.book_name}</span></div>
-                                                                                <div class="flex items-center gap-2 shrink-0"><a href={routes.preview} target="_blank" class="w-10 h-10 rounded-full bg-gray-50 dark:bg-white/5 border border-gray-100 dark:border-white/5 flex items-center justify-center text-gray-600 dark:text-gray-300 hover:bg-blue-600/20 hover:text-blue-600 global-transition"><i class="ph ph-eye text-[18px]"></i></a><button onClick={() => { triggerSystemToastAlert(b.book_name); window.open(routes.download, '_blank'); }} class="w-10 h-10 rounded-full bg-gray-50 dark:bg-white/5 border border-gray-100 dark:border-white/5 flex items-center justify-center text-gray-600 dark:text-gray-300 hover:bg-emerald-500/20 hover:text-emerald-500 global-transition"><i class="ph ph-download text-[18px]"></i></button></div>
-                                                                            </div>
+                                                                            <button key={subj} onClick={() => setActiveSubject(subj)} class="glass-panel bg-white dark:bg-[#0e131f] border border-gray-100 dark:border-blue-500/10 shadow-sm rounded-[20px] p-4 flex flex-row items-center gap-4 group relative overflow-hidden text-left w-full hover:border-blue-500/40 dark:hover:border-blue-500/40 global-transition hover:shadow-md hover:-translate-y-0.5 min-h-[72px] dark:hover:shadow-[0_0_20px_rgba(59,130,246,0.05)]">
+                                                                                <div class={`w-11 h-11 rounded-[12px] flex items-center justify-center shadow-inner border border-black/5 dark:border-white/5 shrink-0 transition-transform group-hover:scale-105 ${iData.colorClass}`}><i class={`ph ${iData.icon} text-xl`}></i></div>
+                                                                                <div class="flex flex-col min-w-0 flex-1 justify-center"><h3 class="font-display text-sm font-bold text-gray-900 dark:text-white tracking-tight group-hover:text-blue-600 transition-colors whitespace-normal break-words leading-tight">{subj}</h3><p class="text-[11px] font-sans font-medium text-gray-400 dark:text-gray-500 tracking-wide mt-0.5 truncate">{groupedBooks[subj].length} Books</p></div>
+                                                                            </button>
                                                                         );
                                                                     })}
                                                                 </div>
-                                                            </div>
+                                                            ) : (
+                                                                <div class="flex flex-col md:flex-row gap-8 w-full max-w-6xl mx-auto animate-fade-in">
+                                                                    <div class="w-full md:w-64 shrink-0 flex flex-col gap-2 sticky top-28 h-fit z-10">
+                                                                        <h3 class="text-[10px] font-black uppercase tracking-widest text-gray-400 dark:text-gray-500 pl-3 mb-2">Course Modules</h3>
+                                                                        {Object.keys(groupedBooks).sort().map(subj => {
+                                                                            const iData = getSubjectIconData(subj);
+                                                                            return (
+                                                                                <button key={subj} onClick={() => setActiveSubject(subj)} class={`w-full text-left px-4 py-3 rounded-[14px] global-transition font-bold text-sm flex items-center gap-2 ${subj === activeSubject ? 'bg-blue-600 text-white shadow-md' : 'hover:bg-gray-200/60 dark:hover:bg-white/10 text-gray-600 dark:text-gray-400'}`}><i class={`ph ${iData.icon} text-base shrink-0 ${subj === activeSubject ? 'text-white' : ''}`}></i><span class="truncate">{subj}</span></button>
+                                                                            );
+                                                                        })}
+                                                                    </div>
+                                                                    <div class="flex-1 space-y-6">
+                                                                        <div class="flex items-center gap-4">
+                                                                            <button onClick={() => setActiveSubject(null)} class="w-10 h-10 rounded-full bg-white dark:bg-[#0e131f] border border-gray-100 dark:border-blue-500/10 flex items-center justify-center text-gray-500 dark:text-gray-400 hover:text-blue-600 transition shadow-sm"><i class="ph ph-arrow-left text-lg font-bold"></i></button>
+                                                                            <h1 class="font-display text-3xl font-black text-gray-900 dark:text-white tracking-tight">{activeSubject}</h1>
+                                                                        </div>
+                                                                        <div class="grid grid-cols-1 xl:grid-cols-2 gap-4">
+                                                                            {groupedBooks[activeSubject].map((b, idx) => {
+                                                                                const routes = resolveDriveLinks(b.drive_link);
+                                                                                return (
+                                                                                    <div key={idx} class="group flex items-center justify-between p-5 rounded-[20px] bg-white dark:bg-[#0e131f] border border-gray-100 dark:border-blue-500/10 shadow-sm global-transition h-full">
+                                                                                        <div class="flex items-center gap-4 w-[75%]"><div class="w-10 h-10 rounded-[14px] bg-gray-50 dark:bg-white/5 flex items-center justify-center border border-gray-100 dark:border-white/5 shrink-0"><i class="ph ph-book-open text-gray-400 dark:text-gray-500 text-[20px]"></i></div><span class="text-sm text-gray-900 dark:text-white font-bold whitespace-normal break-words leading-snug">{b.book_name}</span></div>
+                                                                                        <div class="flex items-center gap-2 shrink-0"><a href={routes.preview} target="_blank" class="w-10 h-10 rounded-full bg-gray-50 dark:bg-white/5 border border-gray-100 dark:border-white/5 flex items-center justify-center text-gray-600 dark:text-gray-300 hover:bg-blue-600/20 hover:text-blue-600 global-transition"><i class="ph ph-eye text-[18px]"></i></a><button onClick={() => { triggerSystemToastAlert(b.book_name); window.open(routes.download, '_blank'); }} class="w-10 h-10 rounded-full bg-gray-50 dark:bg-white/5 border border-gray-100 dark:border-white/5 flex items-center justify-center text-gray-600 dark:text-gray-300 hover:bg-emerald-500/20 hover:text-emerald-500 global-transition"><i class="ph ph-download text-[18px]"></i></button></div>
+                                                                                    </div>
+                                                                                );
+                                                                            })}
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+                                                            )}
                                                         </div>
                                                     )}
                                                 </div>
                                             )}
-                                        </div>
-                                    )}
 
-                                    {/* COMPONENT MODULE: LECTURE NOTES & RECALL DIRECTORIES */}
-                                    {["Note", "Sud_An", "Fresh_Sud_An", "Questionnaire"].includes(currentTab) && (
-                                        <div class="text-left w-full h-full global-transition">
-                                            <div class="mb-6 text-left max-w-5xl mx-auto flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                                                <div>
-                                                    <h2 class="font-display text-3xl font-black text-gray-900 dark:text-white tracking-tight mb-1">Subject Directories</h2>
-                                                    <p class="text-sm font-medium text-gray-500 dark:text-gray-400">Select an asset classification terminal to mount timelines.</p>
-                                                </div>
-                                                <div class="relative w-full sm:w-80 shrink-0">
-                                                    <i class="ph ph-magnifying-glass absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500 text-base"></i>
-                                                    <input type="text" placeholder="Type specific file name..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} class="w-full pl-11 pr-4 py-2.5 rounded-full bg-white dark:bg-[#0e131f] border border-gray-200 dark:border-blue-500/10 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 shadow-sm transition-all" />
-                                                    {searchQuery && <button onClick={() => setSearchQuery("")} class="ph ph-x absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-white text-xs font-bold"></button>}
-                                                </div>
-                                            </div>
+                                            {/* MODULE 3: LECTURE NOTES & RECALLS SYSTEM */}
+                                            {["Note", "Sud_An", "Fresh_Sud_An", "Questionnaire"].includes(currentTab) && (
+                                                <div class="text-left w-full h-full global-transition">
+                                                    
+                                                    {/* MASTER SEARCH TERMINAL ROW */}
+                                                    <div class="mb-6 text-left max-w-5xl mx-auto flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                                                        <div>
+                                                            <h2 class="font-display text-3xl font-black text-gray-900 dark:text-white tracking-tight mb-1">Subject Directories</h2>
+                                                            <p class="text-sm font-medium text-gray-500 dark:text-gray-400">Select an asset classification terminal to view files.</p>
+                                                        </div>
+                                                        <div class="relative w-full sm:w-80 shrink-0">
+                                                            <i class="ph ph-magnifying-glass absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500 text-base"></i>
+                                                            <input type="text" placeholder="Type specific file name..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} class="w-full pl-11 pr-4 py-2.5 rounded-full bg-white dark:bg-[#0e131f] border border-gray-200 dark:border-blue-500/10 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 shadow-sm transition-all" />
+                                                            {searchQuery && <button onClick={() => setSearchQuery("")} class="ph ph-x absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-white text-xs font-bold"></button>}
+                                                        </div>
+                                                    </div>
 
-                                            {searchQuery.trim() ? (
-                                                <div class="max-w-5xl mx-auto space-y-3 animate-fade-in">
-                                                    <h3 class="text-xs font-black text-gray-400 uppercase tracking-widest pl-1 mb-4">Deep File Match Results ({searchedDeepFiles.length})</h3>
-                                                    {searchedDeepFiles.length === 0 ? (
-                                                        <div class="text-center text-sm text-gray-500 italic py-12 bg-white dark:bg-[#0e131f] border border-dashed border-gray-200 dark:border-blue-500/10 rounded-2xl">No documents matched your specific key search phrase.</div>
-                                                    ) : searchedDeepFiles.map((item, idx) => {
-                                                        const routes = resolveDriveLinks(item.file_link);
-                                                        const isRedirect = ["Fresh_Sud_An", "Questionnaire"].includes(item.resource_type);
-                                                        return (
-                                                            <div key={idx} class="group/row flex flex-col sm:flex-row sm:items-center justify-between p-4 rounded-[16px] bg-white dark:bg-[#0e131f] border border-gray-100 dark:border-blue-500/10 hover:border-blue-500/30 hover:translate-x-1 border-l-2 border-l-transparent hover:border-l-blue-500 global-transition shadow-sm gap-3">
-                                                                <div class="flex items-start gap-3.5 flex-1 min-w-0">
-                                                                    <div class="w-9 h-9 rounded-lg bg-gray-50 dark:bg-white/5 flex items-center justify-center border border-gray-100 dark:border-white/5 text-gray-400 shrink-0 mt-0.5"><i class="ph ph-file-text text-lg"></i></div>
-                                                                    <div class="flex flex-col min-w-0 flex-1">
-                                                                        <div class="flex items-center gap-2 flex-wrap"><span class="text-sm font-bold text-gray-900 dark:text-white leading-tight">{item.topic}</span>{renderFileBadge(item.resource_type, item.topic)}</div>
-                                                                        <span class="text-[10px] font-semibold text-gray-400 dark:text-gray-500 tracking-wide uppercase mt-1 font-mono">{item.subject} • {item.block}</span>
-                                                                    </div>
-                                                                </div>
-                                                                <div class="flex items-center gap-1.5 shrink-0 self-end sm:self-auto">
-                                                                    {isRedirect ? (
-                                                                        <a href={item.file_link} target="_blank" class="bg-[#d3ee7a] text-black rounded-xl px-4 py-2 flex items-center justify-center gap-2 hover:opacity-90 font-bold transition shadow-sm text-xs h-9"><span>Open Link</span><i class="ph ph-arrow-right text-xs font-bold"></i></a>
-                                                                    ) : (
-                                                                        <React.Fragment>
-                                                                            <a href={routes.preview} target="_blank" class="w-9 h-9 rounded-lg bg-gray-50 dark:bg-white/5 flex items-center justify-center text-gray-600 dark:text-gray-300 hover:bg-blue-600/20 hover:text-blue-600 global-transition"><i class="ph ph-eye text-base"></i></a>
-                                                                            <button onClick={() => { triggerSystemToastAlert(item.topic); window.open(routes.download, '_blank'); }} class="w-9 h-9 rounded-lg bg-gray-50 dark:bg-white/5 flex items-center justify-center text-gray-600 dark:text-gray-300 hover:bg-emerald-500/20 hover:text-emerald-500 global-transition"><i class="ph ph-download text-base"></i></button>
-                                                                        </React.Fragment>
-                                                                    )}
-                                                                </div>
-                                                            </div>
-                                                        );
-                                                    })}
-                                                </div>
-                                            ) : (
-                                                <div class="w-full">
-                                                    {!activeSubject ? (
-                                                        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 max-w-5xl mx-auto animate-fade-in">
-                                                            {Object.keys(groupedResourcesBySubject).length === 0 ? (
-                                                                <div class="col-span-full text-center text-sm text-gray-500 dark:text-gray-400 italic py-12 border border-dashed border-gray-200 dark:border-white/10 rounded-[32px]">No entries loaded.</div>
-                                                            ) : Object.keys(groupedResourcesBySubject).sort().map(subj => {
-                                                                const iData = getSubjectIconData(subj);
+                                                    {/* DEEP DETAILED FILE MATCH PORTAL */}
+                                                    {searchQuery.trim() ? (
+                                                        <div class="max-w-5xl mx-auto space-y-3 animate-fade-in">
+                                                            <h3 class="text-xs font-black text-gray-400 uppercase tracking-widest pl-1 mb-4">Deep File Match Results ({searchedDeepFiles.length})</h3>
+                                                            {searchedDeepFiles.length === 0 ? (
+                                                                <div class="text-center text-sm text-gray-500 italic py-12 bg-white dark:bg-[#0e131f] border border-dashed border-gray-200 dark:border-blue-500/10 rounded-2xl">No documents matched your specific key search phrase.</div>
+                                                            ) : searchedDeepFiles.map((item, idx) => {
+                                                                const routes = resolveDriveLinks(item.file_link);
+                                                                const isRedirect = ["Fresh_Sud_An", "Questionnaire"].includes(item.resource_type);
                                                                 return (
-                                                                    <button key={subj} onClick={() => setActiveSubject(subj)} class="glass-panel bg-white dark:bg-[#0e131f] border border-gray-100 dark:border-blue-500/10 shadow-sm rounded-[20px] p-4 flex flex-row items-center gap-4 group relative overflow-hidden text-left w-full shadow-none hover:border-blue-500/40 dark:hover:border-blue-500/40 global-transition hover:shadow-md hover:-translate-y-0.5 min-h-[72px] dark:hover:shadow-[0_0_20px_rgba(59,130,246,0.05)]">
-                                                                        <div class={`w-11 h-11 rounded-[12px] flex items-center justify-center text-xl shadow-inner border border-black/5 dark:border-white/5 shrink-0 transition-transform group-hover:scale-105 ${iData.colorClass}`}><i class={`ph ${iData.icon} text-xl`}></i></div>
-                                                                        <div class="flex flex-col min-w-0 flex-1 justify-center"><h3 class="font-display text-sm font-bold text-gray-900 dark:text-white tracking-tight group-hover:text-blue-600 transition-colors whitespace-normal break-words leading-tight">{subj}</h3><p class="text-[11px] font-sans font-medium text-gray-400 dark:text-gray-500 tracking-wide mt-0.5 truncate">{groupedResourcesBySubject[subj].length} Files Indexed</p></div>
-                                                                    </button>
+                                                                    <div key={idx} class="group/row flex flex-col sm:flex-row sm:items-center justify-between p-4 rounded-[16px] bg-white dark:bg-[#0e131f] border border-gray-100 dark:border-blue-500/10 hover:border-blue-500/30 hover:translate-x-1 border-l-2 border-l-transparent hover:border-l-blue-500 global-transition shadow-sm gap-3">
+                                                                        <div class="flex items-start gap-3.5 flex-1 min-w-0">
+                                                                            <div class="w-9 h-9 rounded-lg bg-gray-50 dark:bg-white/5 flex items-center justify-center border border-gray-100 dark:border-white/5 text-gray-400 shrink-0 mt-0.5"><i class="ph ph-file-text text-lg"></i></div>
+                                                                            <div class="flex flex-col min-w-0 flex-1">
+                                                                                <div class="flex items-center gap-2 flex-wrap"><span class="text-sm font-bold text-gray-900 dark:text-white leading-tight">{item.topic}</span>{renderFileBadge(item.resource_type, item.topic)}</div>
+                                                                                <span class="text-[10px] font-semibold text-gray-400 dark:text-gray-500 tracking-wide uppercase mt-1 font-mono">{item.subject} • {item.block}</span>
+                                                                            </div>
+                                                                        </div>
+                                                                        <div class="flex items-center gap-1.5 shrink-0 self-end sm:self-auto">
+                                                                            {isRedirect ? (
+                                                                                <a href={item.file_link} target="_blank" class="bg-[#d3ee7a] text-black rounded-xl px-4 py-2 flex items-center justify-center gap-2 hover:opacity-90 font-bold transition shadow-sm text-xs h-9"><span>Open Link</span><i class="ph ph-arrow-right text-xs font-bold"></i></a>
+                                                                            ) : (
+                                                                                <React.Fragment>
+                                                                                    <a href={routes.preview} target="_blank" class="w-9 h-9 rounded-lg bg-gray-50 dark:bg-white/5 flex items-center justify-center text-gray-600 dark:text-gray-300 hover:bg-blue-600/20 hover:text-blue-600 global-transition"><i class="ph ph-eye text-base"></i></a>
+                                                                                    <button onClick={() => { triggerSystemToastAlert(item.topic); window.open(routes.download, '_blank'); }} class="w-9 h-9 rounded-lg bg-gray-50 dark:bg-white/5 flex items-center justify-center text-gray-600 dark:text-gray-300 hover:bg-emerald-500/20 hover:text-emerald-500 global-transition"><i class="ph ph-download text-base"></i></button>
+                                                                                </React.Fragment>
+                                                                            )}
+                                                                        </div>
+                                                                    </div>
                                                                 );
                                                             })}
                                                         </div>
                                                     ) : (
-                                                        <div class="flex flex-col md:flex-row gap-8 w-full max-w-6xl mx-auto">
-                                                            <div class="w-full md:w-64 shrink-0 flex flex-col gap-2 static md:sticky top-28 h-fit z-10">
-                                                                <h3 class="text-xs font-medium uppercase tracking-widest text-gray-400 dark:text-gray-500 pl-3 mb-2">Course Modules</h3>
-                                                                {Object.keys(groupedResourcesBySubject).sort().map(subj => {
-                                                                    const iData = getSubjectIconData(subj);
-                                                                    return (
-                                                                        <button key={subj} onClick={() => setActiveSubject(subj)} class={`w-full text-left px-4 py-3 rounded-[14px] global-transition font-bold text-sm flex items-center gap-2 ${subj === activeSubject ? 'bg-blue-600 text-white shadow-md' : 'hover:bg-gray-200/60 dark:hover:bg-white/10 text-gray-600 dark:text-gray-400'}`}><i class={`ph ${iData.icon} text-base shrink-0 ${subj === activeSubject ? 'text-white' : ''}`}></i><span class="truncate">{subj}</span></button>
-                                                                    );
-                                                                })}
-                                                            </div>
-
-                                                            <div class="flex-1 max-w-4xl relative">
-                                                                {/* (RECOMMENDATION B SWITCHER HAS BEEN SUCCESSFULLY STRIPPED) */}
-                                                                <div class="flex items-center gap-4 mb-6">
-                                                                    <button onClick={() => setActiveSubject(null)} class="w-10 h-10 rounded-full bg-white dark:bg-[#0e131f] border border-gray-100 dark:border-blue-500/10 flex items-center justify-center text-gray-500 dark:text-gray-400 hover:text-blue-600 transition shadow-sm"><i class="ph ph-arrow-left text-lg font-bold"></i></button>
-                                                                    <h1 class="font-display text-4xl font-black text-gray-900 dark:text-white tracking-tight">{activeSubject}</h1>
-                                                                </div>
-                                                                
-                                                                <div class="relative space-y-4 pb-12">
-                                                                    {(() => {
-                                                                        const sortedBlocksArray = Object.keys(activeSubjectMasterBlocks).sort();
-                                                                        if (sortedBlocksArray.length === 0) {
-                                                                            return <div class="text-center text-sm text-gray-500 italic py-12 border border-dashed border-gray-200 dark:border-white/10 rounded-[20px] bg-white dark:bg-[#0e131f]">No files loaded.</div>;
-                                                                        }
+                                                        <div class="w-full">
+                                                            {!activeSubject ? (
+                                                                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 max-w-5xl mx-auto animate-fade-in">
+                                                                    {Object.keys(groupedResourcesBySubject).length === 0 ? (
+                                                                        <div class="col-span-full text-center text-sm text-gray-500 dark:text-gray-400 italic py-12 border border-dashed border-gray-200 dark:border-white/10 rounded-[32px]">No entries loaded.</div>
+                                                                    ) : Object.keys(groupedResourcesBySubject).sort().map(subj => {
+                                                                        const iData = getSubjectIconData(subj);
                                                                         return (
-                                                                            <React.Fragment>
-                                                                                <div class="flex items-center justify-end gap-2.5 pb-2 text-xs font-bold text-gray-400 dark:text-gray-500 select-none">
-                                                                                    <button onClick={() => { const fullMap = {}; sortedBlocksArray.forEach(b => fullMap[b] = true); setExpandedBlocks(fullMap); }} class="hover:text-blue-600 dark:hover:text-blue-400 global-transition">Expand All</button>
-                                                                                    <span class="opacity-40 font-normal">•</span>
-                                                                                    <button onClick={() => setExpandedBlocks({})} class="hover:text-blue-600 dark:hover:text-blue-400 global-transition">Collapse All</button>
-                                                                                </div>
-
-                                                                                {sortedBlocksArray.map((masterBlock, mIdx) => {
-                                                                                    const isExpanded = expandedBlocks[masterBlock];
-                                                                                    const isSingleRedirect = ["Fresh_Sud_An", "Questionnaire"].includes(currentTab);
-                                                                                    const isLastBlockElement = mIdx === sortedBlocksArray.length - 1;
-                                                                                    
-                                                                                    // --- RECOMMENDATION 1: PRE-FETCH QUANTITY BADGE CALCULATION ENGINE ---
-                                                                                    const totalFilesCount = Object.values(activeSubjectMasterBlocks[masterBlock]).reduce((total, arr) => total + arr.length, 0);
-
-                                                                                    return (
-                                                                                        <div key={masterBlock} class="relative pl-10 group/block">
-                                                                                            {!isLastBlockElement && <div class="absolute left-[21px] top-6 bottom-[-20px] w-0.5 bg-gray-200 dark:bg-white/15 global-transition"></div>}
-                                                                                            <div class="absolute left-[16px] top-[21px] w-2.5 h-2.5 rounded-full bg-blue-600 ring-4 ring-[#f8f9fa] dark:ring-[#050508] global-transition group-hover/block:scale-110 z-10"></div>
-                                                                                            
-                                                                                            <div class="bg-white dark:bg-[#0e131f] border border-gray-100 dark:border-blue-500/10 rounded-[20px] shadow-sm overflow-hidden global-transition hover:border-gray-200 dark:hover:border-white/10">
-                                                                                                <div onClick={() => toggleBlock(masterBlock)} class="flex justify-between items-center p-4 cursor-pointer hover:bg-gray-50 dark:hover:bg-white/[0.01] select-none h-[54px]">
-                                                                                                    <div class="flex items-center gap-3">
-                                                                                                        <div class="w-9 h-9 rounded-lg bg-blue-600/10 flex items-center justify-center text-blue-600"><i class={`ph ${isExpanded ? 'ph-folder-open' : 'ph-folder'} text-lg`}></i></div>
-                                                                                                        <h2 class="font-display text-base font-bold text-gray-900 dark:text-white tracking-tight">{masterBlock}</h2>
-                                                                                                    </div>
-                                                                                                    
-                                                                                                    <div class="flex items-center gap-2">
-                                                                                                        {/* RENDER DYNAMIC UNIT COUNT BADGE PILL */}
-                                                                                                        <span class="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-gray-100 dark:bg-white/5 text-gray-500 dark:text-gray-400">
-                                                                                                            {totalFilesCount} {totalFilesCount === 1 ? 'file' : 'files'}
-                                                                                                        </span>
-                                                                                                        <i class={`ph ph-caret-down text-gray-400 text-base global-transition ${isExpanded ? 'rotate-180' : ''}`}></i>
-                                                                                                    </div>
-                                                                                                </div>
-                                                                                                
-                                                                                                {/* ENHANCED ANIMATION TRANSLATION LAYER (FLUID CLIPPING SYSTEM) */}
-                                                                                                <div class={`transition-all duration-300 ease-in-out overflow-hidden ${isExpanded ? 'max-h-[5000px] opacity-100 border-t border-gray-100 dark:border-white/5' : 'max-h-0 opacity-0'}`}>
-                                                                                                    <div class="p-4 pt-4 space-y-6 bg-gray-50/50 dark:bg-black/20">
-                                                                                                        {Object.keys(activeSubjectMasterBlocks[masterBlock]).sort().map(subBlock => (
-                                                                                                            <div key={subBlock} class="space-y-3">
-                                                                                                                {subBlock !== masterBlock && (
-                                                                                                                    <h3 class="text-[10px] font-black uppercase tracking-widest text-blue-600 flex items-center gap-2 pl-1">
-                                                                                                                        <span class="w-1.5 h-1.5 rounded-full bg-blue-600 animate-pulse"></span>
-                                                                                                                        {subBlock}
-                                                                                                                    </h3>
-                                                                                                                )}
-                                                                                                                <div class="flex flex-col gap-2.5">
-                                                                                                                    {activeSubjectMasterBlocks[masterBlock][subBlock].map((item, idx) => {
-                                                                                                                        const routes = resolveDriveLinks(item.file_link);
-                                                                                                                        return isSingleRedirect ? (
-                                                                                                                            <div key={idx} class="group/row flex flex-col md:flex-row md:items-center justify-between p-3.5 rounded-[16px] bg-white dark:bg-[#16171d] border border-gray-100 dark:border-white/5 hover:border-blue-600/30 hover:translate-x-1 border-l-2 hover:border-l-blue-500 global-transition shadow-sm gap-3">
-                                                                                                                                <div class="flex items-start gap-3 w-full md:w-[75%]">
-                                                                                                                                    <div class="w-9 h-9 rounded-lg bg-blue-600/10 flex items-center justify-center text-blue-600 shrink-0 mt-0.5"><i class="ph ph-terminal-window text-lg"></i></div>
-                                                                                                                                    <div class="flex items-center gap-2 flex-wrap pt-1.5"><span class="text-sm text-gray-900 dark:text-white font-bold whitespace-normal break-words leading-tight">{item.topic}</span>{renderFileBadge(item.resource_type, item.topic)}</div>
-                                                                                                                                </div>
-                                                                                                                                <a href={item.file_link} target="_blank" class="w-full md:w-auto bg-[#d3ee7a] text-black rounded-xl px-4 py-2 flex items-center justify-center gap-2 hover:opacity-90 font-bold shrink-0 shadow-sm global-transition text-xs h-9"><span>Open Link</span><i class="ph ph-arrow-right text-xs font-bold"></i></a>
-                                                                                                                            </div>
-                                                                                                                        ) : (
-                                                                                                                            <div key={idx} class="group/row flex flex-col md:flex-row md:items-center justify-between p-3.5 rounded-[16px] bg-white dark:bg-[#16171d] border border-gray-100 dark:border-white/5 hover:border-gray-300 dark:hover:border-white/20 hover:translate-x-1 border-l-2 border-l-transparent hover:border-l-blue-500 global-transition shadow-sm gap-3">
-                                                                                                                                <div class="flex items-start gap-3 w-full md:w-[75%]">
-                                                                                                                                    <div class="w-9 h-9 rounded-lg bg-gray-50 dark:bg-white/5 flex items-center justify-center text-gray-400 dark:text-gray-500 shrink-0 mt-0.5 border border-gray-100 dark:border-white/5"><i class="ph ph-file-text text-lg"></i></div>
-                                                                                                                                    <div class="flex items-center gap-2 flex-wrap pt-1.5"><span class="text-sm text-gray-900 dark:text-white font-bold whitespace-normal break-words leading-tight">{item.topic}</span>{renderFileBadge(item.resource_type, item.topic)}</div>
-                                                                                                                                </div>
-                                                                                                                                <div class="flex items-center gap-2 w-full md:w-auto shrink-0 justify-end bg-gray-100/50 dark:bg-white/5 p-1 rounded-xl md:bg-transparent md:dark:bg-transparent">
-                                                                                                                                    <a href={routes.preview} target="_blank" title="Preview Document" class="flex-1 md:flex-none w-auto md:w-9 h-9 rounded-lg bg-white dark:bg-white/5 border border-gray-200 dark:border-white/5 flex items-center justify-center text-gray-600 dark:text-gray-300 hover:bg-blue-600/20 hover:text-blue-600 dark:hover:bg-blue-600/20 dark:hover:text-blue-400 global-transition shadow-sm md:shadow-none"><i class="ph ph-eye text-base"></i></a>
-                                                                                                                                    <button onClick={() => { triggerSystemToastAlert(item.topic); window.open(routes.download, '_blank'); }} title="Download File" class="flex-1 md:flex-none w-auto md:w-9 h-9 rounded-lg bg-white dark:bg-white/5 border border-gray-200 dark:border-white/5 flex items-center justify-center text-gray-600 dark:text-gray-300 hover:bg-emerald-500/20 hover:text-emerald-500 dark:hover:bg-emerald-500/20 dark:hover:text-emerald-400 global-transition shadow-sm md:shadow-none"><i class="ph ph-download text-base"></i></button>
-                                                                                                                                </div>
-                                                                                                                            </div>
-                                                                                                                        );
-                                                                                                                    })}
-                                                                                                                </div>
-                                                                                                            </div>
-                                                                                                        ))}
-                                                                                                    </div>
-                                                                                                </div>
-                                                                                            </div>
-                                                                                        </div>
-                                                                                    );
-                                                                                })}
-                                                                            </React.Fragment>
+                                                                            <button key={subj} onClick={() => setActiveSubject(subj)} class="glass-panel bg-white dark:bg-[#0e131f] border border-gray-100 dark:border-blue-500/10 shadow-sm rounded-[20px] p-4 flex flex-row items-center gap-4 group relative overflow-hidden text-left w-full shadow-none hover:border-blue-500/40 dark:hover:border-blue-500/40 global-transition hover:shadow-md hover:-translate-y-0.5 min-h-[72px] dark:hover:shadow-[0_0_20px_rgba(59,130,246,0.05)]">
+                                                                                <div class={`w-11 h-11 rounded-[12px] flex items-center justify-center shadow-inner border border-black/5 dark:border-white/5 shrink-0 transition-transform group-hover:scale-105 ${iData.colorClass}`}><i class={`ph ${iData.icon} text-xl`}></i></div>
+                                                                                <div class="flex flex-col min-w-0 flex-1 justify-center"><h3 class="font-display text-sm font-bold text-gray-900 dark:text-white tracking-tight group-hover:text-blue-600 transition-colors whitespace-normal break-words leading-tight">{subj}</h3><p class="text-[11px] font-sans font-medium text-gray-400 dark:text-gray-500 tracking-wide mt-0.5 truncate">{groupedResourcesBySubject[subj].length} Files Indexed</p></div>
+                                                                            </button>
                                                                         );
-                                                                    })()}
+                                                                    })}
                                                                 </div>
-                                                            </div>
+                                                            ) : (
+                                                                <div class="flex flex-col md:flex-row gap-8 w-full max-w-6xl mx-auto animate-fade-in">
+                                                                    <div class="w-full md:w-64 shrink-0 flex flex-col gap-2 static md:sticky top-28 h-fit z-10">
+                                                                        <h3 class="text-xs font-medium uppercase tracking-widest text-gray-400 dark:text-gray-500 pl-3 mb-2">Course Modules</h3>
+                                                                        {Object.keys(groupedResourcesBySubject).sort().map(subj => {
+                                                                            const iData = getSubjectIconData(subj);
+                                                                            return (
+                                                                                <button key={subj} onClick={() => setActiveSubject(subj)} class={`w-full text-left px-4 py-3 rounded-[14px] global-transition font-bold text-sm flex items-center gap-2 ${subj === activeSubject ? 'bg-blue-600 text-white shadow-md' : 'hover:bg-gray-200/60 dark:hover:bg-white/10 text-gray-600 dark:text-gray-400'}`}><i class={`ph ${iData.icon} text-base shrink-0 ${subj === activeSubject ? 'text-white' : ''}`}></i><span class="truncate">{subj}</span></button>
+                                                                            );
+                                                                        })}
+                                                                    </div>
+
+                                                                    <div class="flex-1 max-w-4xl relative">
+                                                                        <div class="flex items-center gap-4 mb-6">
+                                                                            <button onClick={() => setActiveSubject(null)} class="w-10 h-10 rounded-full bg-white dark:bg-[#0e131f] border border-gray-100 dark:border-blue-500/10 flex items-center justify-center text-gray-500 dark:text-gray-400 hover:text-blue-600 transition shadow-sm"><i class="ph ph-arrow-left text-lg font-bold"></i></button>
+                                                                            <h1 class="font-display text-4xl font-black text-gray-900 dark:text-white tracking-tight">{activeSubject}</h1>
+                                                                        </div>
+                                                                        
+                                                                        <div class="relative space-y-4 pb-12">
+                                                                            {(() => {
+                                                                                const sortedBlocksArray = Object.keys(activeSubjectMasterBlocks).sort();
+                                                                                if (sortedBlocksArray.length === 0) {
+                                                                                    return <div class="text-center text-sm text-gray-500 italic py-12 border border-dashed border-gray-200 dark:border-white/10 rounded-[20px] bg-white dark:bg-[#0e131f]">No files loaded.</div>;
+                                                                                }
+                                                                                return (
+                                                                                    <React.Fragment>
+                                                                                        <div class="flex items-center justify-end gap-2.5 pb-2 text-xs font-bold text-gray-400 dark:text-gray-500 select-none">
+                                                                                            <button onClick={() => { const fullMap = {}; sortedBlocksArray.forEach(b => fullMap[b] = true); setExpandedBlocks(fullMap); }} class="hover:text-blue-600 dark:hover:text-blue-400 global-transition">Expand All</button>
+                                                                                            <span class="opacity-40 font-normal">•</span>
+                                                                                            <button onClick={() => setExpandedBlocks({})} class="hover:text-blue-600 dark:hover:text-blue-400 global-transition">Collapse All</button>
+                                                                                        </div>
+
+                                                                                        {sortedBlocksArray.map((masterBlock, mIdx) => {
+                                                                                            const isExpanded = expandedBlocks[masterBlock];
+                                                                                            const isSingleRedirect = ["Fresh_Sud_An", "Questionnaire"].includes(currentTab);
+                                                                                            const isLastBlockElement = mIdx === sortedBlocksArray.length - 1;
+                                                                                            const totalFilesCount = Object.values(activeSubjectMasterBlocks[masterBlock]).reduce((total, arr) => total + arr.length, 0);
+
+                                                                                            return (
+                                                                                                <div key={masterBlock} class="relative pl-10 group/block">
+                                                                                                    {!isLastBlockElement && <div class="absolute left-[21px] top-6 bottom-[-20px] w-0.5 bg-gray-200 dark:bg-white/15 global-transition"></div>}
+                                                                                                    <div class="absolute left-[16px] top-[21px] w-2.5 h-2.5 rounded-full bg-blue-600 ring-4 ring-[#f8f9fa] dark:ring-[#050508] global-transition group-hover/block:scale-110 z-10"></div>
+                                                                                                    
+                                                                                                    <div class="bg-white dark:bg-[#0e131f] border border-gray-100 dark:border-blue-500/10 rounded-[20px] shadow-sm overflow-hidden global-transition hover:border-gray-200 dark:hover:border-white/10">
+                                                                                                        <div onClick={() => toggleBlock(masterBlock)} class="flex justify-between items-center p-4 cursor-pointer hover:bg-gray-50 dark:hover:bg-white/[0.01] select-none h-[54px]">
+                                                                                                            <div class="flex items-center gap-3">
+                                                                                                                <div class="w-9 h-9 rounded-lg bg-blue-600/10 flex items-center justify-center text-blue-600"><i class={`ph ${isExpanded ? 'ph-folder-open' : 'ph-folder'} text-lg`}></i></div>
+                                                                                                                <h2 class="font-display text-base font-bold text-gray-900 dark:text-white tracking-tight">{masterBlock}</h2>
+                                                                                                            </div>
+                                                                                                            <div class="flex items-center gap-2">
+                                                                                                                <span class="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-gray-100 dark:bg-white/5 text-gray-500 dark:text-gray-400">{totalFilesCount} {totalFilesCount === 1 ? 'file' : 'files'}</span>
+                                                                                                                <i class={`ph ph-caret-down text-gray-400 text-base global-transition ${isExpanded ? 'rotate-180' : ''}`}></i>
+                                                                                                            </div>
+                                                                                                        </div>
+                                                                                                        
+                                                                                                        {/* ACCORDION SLIDE CONTENT CONTAINER */}
+                                                                                                        <div class={`accordion-content overflow-hidden transition-all duration-300 ease-in-out ${isExpanded ? 'max-h-[5000px] opacity-100 border-t border-gray-100 dark:border-white/5' : 'max-h-0 opacity-0'}`}>
+                                                                                                            <div class="p-4 pt-4 space-y-6 bg-gray-50/50 dark:bg-black/20">
+                                                                                                                {Object.keys(activeSubjectMasterBlocks[masterBlock]).sort().map(subBlock => (
+                                                                                                                    <div key={subBlock} class="space-y-3">
+                                                                                                                        {subBlock !== masterBlock && (
+                                                                                                                            <h3 class="text-[10px] font-black uppercase tracking-widest text-blue-600 flex items-center gap-2 pl-1">
+                                                                                                                                <span class="w-1.5 h-1.5 rounded-full bg-blue-600 animate-pulse"></span>
+                                                                                                                                {subBlock}
+                                                                                                                            </h3>
+                                                                                                                        )}
+                                                                                                                        <div class="flex flex-col gap-2.5">
+                                                                                                                            {activeSubjectMasterBlocks[masterBlock][subBlock].map((item, idx) => {
+                                                                                                                                const routes = resolveDriveLinks(item.file_link);
+                                                                                                                                return isSingleRedirect ? (
+                                                                                                                                    <div key={idx} class="group/row flex flex-col md:flex-row md:items-center justify-between p-3.5 rounded-[16px] bg-white dark:bg-[#16171d] border border-gray-100 dark:border-white/5 hover:border-blue-600/30 hover:translate-x-1 border-l-2 hover:border-l-blue-500 global-transition shadow-sm gap-3">
+                                                                                                                                        <div class="flex items-start gap-3 w-full md:w-[75%]">
+                                                                                                                                            <div class="w-9 h-9 rounded-lg bg-blue-600/10 flex items-center justify-center text-blue-600 shrink-0 mt-0.5"><i class="ph ph-terminal-window text-lg"></i></div>
+                                                                                                                                            <div class="flex items-center gap-2 flex-wrap pt-1.5"><span class="text-sm text-gray-900 dark:text-white font-bold whitespace-normal break-words leading-tight">{item.topic}</span>{renderFileBadge(item.resource_type, item.topic)}</div>
+                                                                                                                                        </div>
+                                                                                                                                        <a href={item.file_link} target="_blank" class="w-full md:w-auto bg-[#d3ee7a] text-black rounded-xl px-4 py-2 flex items-center justify-center gap-2 hover:opacity-90 font-bold shrink-0 shadow-sm global-transition text-xs h-9"><span>Open Link</span><i class="ph ph-arrow-right text-xs font-bold"></i></a>
+                                                                                                                                    </div>
+                                                                                                                                ) : (
+                                                                                                                                    <div key={idx} class="group/row flex flex-col md:flex-row md:items-center justify-between p-3.5 rounded-[16px] bg-white dark:bg-[#16171d] border border-gray-100 dark:border-white/5 hover:border-gray-300 dark:hover:border-white/20 hover:translate-x-1 border-l-2 border-l-transparent hover:border-l-blue-500 global-transition shadow-sm gap-3">
+                                                                                                                                        <div class="flex items-start gap-3 w-full md:w-[75%]">
+                                                                                                                                            <div class="w-9 h-9 rounded-lg bg-gray-50 dark:bg-white/5 flex items-center justify-center text-gray-400 dark:text-gray-500 shrink-0 mt-0.5 border border-gray-100 dark:border-white/5"><i class="ph ph-file-text text-lg"></i></div>
+                                                                                                                                            <div class="flex items-center gap-2 flex-wrap pt-1.5"><span class="text-sm text-gray-900 dark:text-white font-bold whitespace-normal break-words leading-tight">{item.topic}</span>{renderFileBadge(item.resource_type, item.topic)}</div>
+                                                                                                                                        </div>
+                                                                                                                                        <div class="flex items-center gap-2 w-full md:w-auto shrink-0 justify-end bg-gray-100/50 dark:bg-white/5 p-1 rounded-xl md:bg-transparent md:dark:bg-transparent">
+                                                                                                                                            <a href={routes.preview} target="_blank" title="Preview Document" class="flex-1 md:flex-none w-auto md:w-9 h-9 rounded-lg bg-white dark:bg-white/5 border border-gray-200 dark:border-white/5 flex items-center justify-center text-gray-600 dark:text-gray-300 hover:bg-blue-600/20 hover:text-blue-600 dark:hover:bg-blue-600/20 dark:hover:text-blue-400 global-transition shadow-sm md:shadow-none"><i class="ph ph-eye text-base"></i></a>
+                                                                                                                                            <button onClick={() => { triggerSystemToastAlert(item.topic); window.open(routes.download, '_blank'); }} title="Download File" class="flex-1 md:flex-none w-auto md:w-9 h-9 rounded-lg bg-white dark:bg-white/5 border border-gray-200 dark:border-white/5 flex items-center justify-center text-gray-600 dark:text-gray-300 hover:bg-emerald-500/20 hover:text-emerald-500 dark:hover:bg-emerald-500/20 dark:hover:text-emerald-400 global-transition shadow-sm md:shadow-none"><i class="ph ph-download text-base"></i></button>
+                                                                                                                                        </div>
+                                                                                                                                    </div>
+                                                                                                                                );
+                                                                                                                            })}
+                                                                                                                        </div>
+                                                                                                                    </div>
+                                                                                                                ))}
+                                                                                                            </div>
+                                                                                                        </div>
+                                                                                                    </div>
+                                                                                                </div>
+                                                                                            );
+                                                                                        })}
+                                                                                    </React.Fragment>
+                                                                                );
+                                                                            })()}
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+                                                            )}
                                                         </div>
                                                     )}
                                                 </div>
                                             )}
-                                        </div>
-                                    )}
 
-                                    {/* COMPONENT MODULE: BATCH FOLDERS CORES */}
-                                    {currentTab === "folders" && (
-                                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-left max-w-4xl mx-auto">
-                                            {batchFolders.length === 0 ? <div class="col-span-full text-center text-sm text-gray-500 italic py-8">No shared connection folders.</div> : batchFolders.filter(f => f.batch === selectedBatch && f.semester === selectedSemester).map((f, idx) => (
-                                                <a key={idx} href={f.folder_link} target="_blank" class="p-6 bg-white dark:bg-[#0e131f] border border-gray-100 dark:border-blue-500/10 shadow-sm rounded-[32px] flex items-center justify-between group flex-row hover:-translate-y-1 hover:shadow-md hover:border-blue-600/30 global-transition">
-                                                    <div class="space-y-2 max-w-[85%]">
-                                                        <div class="flex items-center gap-2 text-[10px] font-bold tracking-widest uppercase text-gray-400"><span>{f.batch}</span><span>•</span><span>{f.semester}</span><span>•</span><span class="text-blue-600">{f.category}</span></div>
-                                                        <h4 class="text-lg font-bold text-gray-900 dark:text-white whitespace-normal break-words leading-tight group-hover:text-blue-600 transition-colors">{f.topic}</h4>
-                                                        <p class="text-sm text-gray-500 dark:text-gray-400 font-medium">{f.subject}</p>
+                                            {/* MODULE 4: BATCH CONNECTION FOLDERS */}
+                                            {currentTab === "folders" && (
+                                                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-left max-w-4xl mx-auto animate-fade-in">
+                                                    {batchFolders.length === 0 ? <div class="col-span-full text-center text-sm text-gray-500 italic py-8">No shared connection folders.</div> : batchFolders.filter(f => f.batch === selectedBatch && f.semester === selectedSemester).map((f, idx) => (
+                                                        <a key={idx} href={f.folder_link} target="_blank" class="p-6 bg-white dark:bg-[#0e131f] border border-gray-100 dark:border-blue-500/10 shadow-sm rounded-[32px] flex items-center justify-between group flex-row hover:-translate-y-1 hover:shadow-md hover:border-blue-600/30 global-transition">
+                                                            <div class="space-y-2 max-w-[85%]">
+                                                                <div class="flex items-center gap-2 text-[10px] font-bold tracking-widest uppercase text-gray-400"><span>{f.batch}</span><span>•</span><span>{f.semester}</span><span>•</span><span class="text-blue-600">{f.category}</span></div>
+                                                                <h4 class="text-lg font-bold text-gray-900 dark:text-white whitespace-normal break-words leading-tight group-hover:text-blue-600 transition-colors">{f.topic}</h4>
+                                                                <p class="text-sm text-gray-500 dark:text-gray-400 font-medium">{f.subject}</p>
+                                                            </div>
+                                                            <i class="ph ph-folder-open text-gray-300 dark:text-gray-600 group-hover:text-blue-600 text-3xl transition-colors shrink-0"></i>
+                                                        </a>
+                                                    ))}
+                                                </div>
+                                            )}
+
+                                            {/* MODULE 5: SCHOOL CALENDARS */}
+                                            {currentTab === "calendar" && (
+                                                <div class="space-y-4 text-left h-full flex flex-col max-w-5xl mx-auto animate-fade-in">
+                                                    <div class="bg-white dark:bg-[#0e131f] border border-gray-100 dark:border-blue-500/10 p-2 rounded-[32px] h-[65vh] min-h-[450px] flex-1 shadow-sm">
+                                                        <iframe src={configMap.calendar_embed_url || "https://calendar.google.com/calendar/embed?src=en.philippines%23holiday%40group.v.calendar.google.com"} style={{border: 0, borderRadius: "20px"}} class="w-full h-full dark:opacity-75 dark:invert dark:contrast-125" frameborder="0" scrolling="no"></iframe>
                                                     </div>
-                                                    <i class="ph ph-folder-open text-gray-300 dark:text-gray-600 group-hover:text-blue-600 text-3xl transition-colors shrink-0"></i>
-                                                </a>
-                                            ))}
-                                        </div>
-                                    )}
-
-                                    {/* COMPONENT MODULE: EMED CALENDARS */}
-                                    {currentTab === "calendar" && (
-                                        <div class="space-y-4 text-left h-full flex flex-col max-w-5xl mx-auto">
-                                            <div class="bg-white dark:bg-[#0e131f] border border-gray-100 dark:border-blue-500/10 p-2 rounded-[32px] h-[65vh] min-h-[450px] flex-1 shadow-sm">
-                                                <iframe src={configMap.calendar_embed_url || "https://calendar.google.com/calendar/embed?src=en.philippines%23holiday%40group.v.calendar.google.com"} style={{border: 0, borderRadius: "20px"}} class="w-full h-full dark:opacity-75 dark:invert dark:contrast-125" frameborder="0" scrolling="no"></iframe>
-                                            </div>
-                                        </div>
+                                                </div>
+                                            )}
+                                        </React.Fragment>
                                     )}
                                 </div>
                             </main>
 
-                            {/* CONTAINER NAVBAR Mobile View Only */}
+                            {/* MOBILE NAVIGATION BAR COMPACT */}
                             <nav class="md:hidden fixed bottom-0 left-0 w-full h-16 bg-white/90 dark:bg-[#0c0d12]/90 backdrop-blur-md border-t border-gray-100 dark:border-white/5 z-50 px-4 flex items-center gap-6 overflow-x-auto no-scrollbar shadow-lg">
                                 {[
                                     { id: "dashboard", icon: "ph-terminal-window", label: "Overview" },
@@ -891,11 +1209,17 @@
                                     { id: "folders", icon: "ph-folder-user", label: "Archives" },
                                     { id: "calendar", icon: "ph-calendar-blank", label: "Calendar" }
                                 ].map(tab => (
-                                    <button key={tab.id} onClick={() => setCurrentTab(tab.id)} class={`flex flex-col items-center justify-center shrink-0 min-w-[48px] h-full transition-all duration-200 ${currentTab === tab.id ? "text-blue-600 dark:text-[#b4c5ff] font-bold scale-105" : "text-gray-400 dark:text-gray-500"}`}>
+                                    <button key={tab.id} onClick={() => { setCurrentTab(tab.id); setIsAdminMode(false); }} class={`flex flex-col items-center justify-center shrink-0 min-w-[48px] h-full transition-all duration-200 ${currentTab === tab.id && !isAdminMode ? "text-blue-600 dark:text-[#b4c5ff] font-bold scale-105" : "text-gray-400 dark:text-gray-500"}`}>
                                         <i class={`ph ${tab.icon} text-[20px] mb-0.5`}></i>
                                         <span class="text-[9px] tracking-tight">{tab.label}</span>
                                     </button>
                                 ))}
+                                {isUserAdminOfficer && (
+                                    <button onClick={() => setIsAdminMode(!isAdminMode)} class={`flex flex-col items-center justify-center shrink-0 min-w-[48px] h-full transition-all duration-200 ${isAdminMode ? "text-amber-500 font-bold scale-105" : "text-gray-400 dark:text-gray-500"}`}>
+                                        <i class="ph ph-key text-[20px] mb-0.5"></i>
+                                        <span class="text-[9px] tracking-tight">Admin</span>
+                                    </button>
+                                )}
                                 <div class="h-6 w-[1px] bg-gray-200 dark:bg-white/10 shrink-0"></div>
                                 <button onClick={() => setIsDark(!isDark)} class="flex flex-col items-center justify-center shrink-0 min-w-[48px] h-full text-gray-400 dark:text-gray-500 transition-all active:scale-95">
                                     <i class={`ph ${isDark ? 'ph-sun' : 'ph-moon'} text-[20px] mb-0.5`}></i>
